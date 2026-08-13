@@ -35,16 +35,20 @@ function normalizeStore(config, index) {
     .replace(/\/$/, "");
   const name = String(config.name || store || `store-${index + 1}`);
   const accessToken = config.accessToken || config.adminApiToken;
+  const clientId = config.clientId || config.apiKey;
+  const clientSecret = config.clientSecret || config.apiSecret;
   const feishuWebhookUrl = config.feishuWebhookUrl;
-  if (!store || !accessToken || !feishuWebhookUrl) {
-    throw new Error(`Store config ${index + 1} requires store, accessToken, and feishuWebhookUrl`);
+  if (!store || (!accessToken && (!clientId || !clientSecret)) || !feishuWebhookUrl) {
+    throw new Error(`Store config ${index + 1} requires store, clientId/clientSecret (or accessToken), and feishuWebhookUrl`);
   }
   return {
     name,
     store,
     accessToken,
+    clientId,
+    clientSecret,
     feishuWebhookUrl,
-    apiVersion: config.apiVersion || process.env.SHOPIFY_API_VERSION || "2026-01",
+    apiVersion: config.apiVersion || process.env.SHOPIFY_API_VERSION || "2026-07",
     timezone: config.timezone || process.env.SHOPIFY_TIMEZONE || "America/Los_Angeles",
   };
 }
@@ -127,10 +131,32 @@ function searchFor(start, end) {
   return `updated_at:>=${syncStart} updated_at:<${syncEnd}`;
 }
 
+async function getAccessToken(storeConfig) {
+  if (storeConfig.accessToken) return storeConfig.accessToken;
+  if (storeConfig.cachedAccessToken) return storeConfig.cachedAccessToken;
+
+  const response = await fetch(`https://${storeConfig.store}/admin/oauth/access_token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: storeConfig.clientId,
+      client_secret: storeConfig.clientSecret,
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.access_token) {
+    throw new Error(`Shopify token request failed: HTTP ${response.status} ${JSON.stringify(body)}`);
+  }
+  storeConfig.cachedAccessToken = body.access_token;
+  return body.access_token;
+}
+
 async function shopify(storeConfig, queryText, variables) {
+  const accessToken = await getAccessToken(storeConfig);
   const response = await fetch(`https://${storeConfig.store}/admin/api/${storeConfig.apiVersion}/graphql.json`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-shopify-access-token": storeConfig.accessToken },
+    headers: { "content-type": "application/json", "x-shopify-access-token": accessToken },
     body: JSON.stringify({ query: queryText, variables })
   });
   const body = await response.json();
