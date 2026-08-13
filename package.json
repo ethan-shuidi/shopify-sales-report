@@ -1,0 +1,13 @@
+{
+  "name": "shopify-feishu-report",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "report": "node src/report.mjs",
+    "check": "node --check src/report.mjs"
+  }
+}
