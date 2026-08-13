@@ -29,7 +29,7 @@ SHOPIFY_TIMEZONE          # 可选，作为每店铺的默认值
 
 ## 权限
 
-Custom app 至少需要 `read_orders`。读取较早历史订单可能需要 Shopify 批准 `read_all_orders`。
+当前报表只需要 `read_orders`。读取较早历史订单可能需要 Shopify 批准 `read_all_orders`。如未来需要查询独立商品目录、产品供应商或商品标签等信息，再增加 `read_products`。
 
 ## 统计口径
 
