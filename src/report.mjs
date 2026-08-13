@@ -1,12 +1,53 @@
-const required = ["SHOPIFY_STORE", "SHOPIFY_ACCESS_TOKEN", "FEISHU_WEBHOOK_URL"];
-for (const key of required) {
-  if (!process.env[key]) throw new Error(`Missing environment variable: ${key}`);
+const reportType = (process.env.REPORT_TYPE || "daily").toLowerCase();
+
+function readStores() {
+  if (process.env.SHOPIFY_STORES_JSON) {
+    let stores;
+    try {
+      stores = JSON.parse(process.env.SHOPIFY_STORES_JSON);
+    } catch (error) {
+      throw new Error(`SHOPIFY_STORES_JSON is not valid JSON: ${error.message}`);
+    }
+    if (!Array.isArray(stores) || stores.length === 0) {
+      throw new Error("SHOPIFY_STORES_JSON must be a non-empty JSON array");
+    }
+    return stores.map((config, index) => normalizeStore(config, index));
+  }
+
+  // Temporary backwards compatibility for the original one-store setup.
+  const required = ["SHOPIFY_STORE", "SHOPIFY_ACCESS_TOKEN", "FEISHU_WEBHOOK_URL"];
+  for (const key of required) {
+    if (!process.env[key]) throw new Error(`Missing environment variable: ${key}`);
+  }
+  return [normalizeStore({
+    name: process.env.SHOPIFY_STORE,
+    store: process.env.SHOPIFY_STORE,
+    accessToken: process.env.SHOPIFY_ACCESS_TOKEN,
+    feishuWebhookUrl: process.env.FEISHU_WEBHOOK_URL,
+    apiVersion: process.env.SHOPIFY_API_VERSION,
+    timezone: process.env.SHOPIFY_TIMEZONE,
+  }, 0)];
 }
 
-const store = process.env.SHOPIFY_STORE.replace(/^https?:\/\//, "").replace(/\/$/, "");
-const apiVersion = process.env.SHOPIFY_API_VERSION || "2026-01";
-const timezone = process.env.SHOPIFY_TIMEZONE || "America/Los_Angeles";
-const reportType = (process.env.REPORT_TYPE || "daily").toLowerCase();
+function normalizeStore(config, index) {
+  const store = String(config.store || config.shopDomain || "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, "");
+  const name = String(config.name || store || `store-${index + 1}`);
+  const accessToken = config.accessToken || config.adminApiToken;
+  const feishuWebhookUrl = config.feishuWebhookUrl;
+  if (!store || !accessToken || !feishuWebhookUrl) {
+    throw new Error(`Store config ${index + 1} requires store, accessToken, and feishuWebhookUrl`);
+  }
+  return {
+    name,
+    store,
+    accessToken,
+    feishuWebhookUrl,
+    apiVersion: config.apiVersion || process.env.SHOPIFY_API_VERSION || "2026-01",
+    timezone: config.timezone || process.env.SHOPIFY_TIMEZONE || "America/Los_Angeles",
+  };
+}
 
 const query = `#graphql
 query Orders($first: Int!, $after: String, $search: String!) {
@@ -31,7 +72,7 @@ query Orders($first: Int!, $after: String, $search: String!) {
   }
 }`;
 
-function dateParts(date) {
+function dateParts(date, timezone) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric", month: "2-digit", day: "2-digit"
@@ -39,8 +80,8 @@ function dateParts(date) {
   return Object.fromEntries(parts.filter((p) => p.type !== "literal").map((p) => [p.type, p.value]));
 }
 
-function dateKey(date) {
-  const p = dateParts(date);
+function dateKey(date, timezone) {
+  const p = dateParts(date, timezone);
   return `${p.year}-${p.month}-${p.day}`;
 }
 
@@ -50,8 +91,8 @@ function addDays(key, amount) {
   return date.toISOString().slice(0, 10);
 }
 
-function periodFor(type, now = new Date()) {
-  const today = dateKey(now);
+function periodFor(type, timezone, now = new Date()) {
+  const today = dateKey(now, timezone);
   if (type === "daily") return { label: "日报", start: addDays(today, -1), end: today };
   if (type === "weekly") {
     const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
@@ -64,6 +105,11 @@ function periodFor(type, now = new Date()) {
     return { label: "月报", start: previousFirst, end: first };
   }
   throw new Error(`REPORT_TYPE must be daily, weekly, or monthly; got ${type}`);
+}
+
+function previousPeriod(period) {
+  const length = Math.round((Date.parse(`${period.end}T00:00:00Z`) - Date.parse(`${period.start}T00:00:00Z`)) / 86400000);
+  return { label: period.label, start: addDays(period.start, -length), end: period.start };
 }
 
 function money(set) {
@@ -81,10 +127,10 @@ function searchFor(start, end) {
   return `updated_at:>=${syncStart} updated_at:<${syncEnd}`;
 }
 
-async function shopify(queryText, variables) {
-  const response = await fetch(`https://${store}/admin/api/${apiVersion}/graphql.json`, {
+async function shopify(storeConfig, queryText, variables) {
+  const response = await fetch(`https://${storeConfig.store}/admin/api/${storeConfig.apiVersion}/graphql.json`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-shopify-access-token": process.env.SHOPIFY_ACCESS_TOKEN },
+    headers: { "content-type": "application/json", "x-shopify-access-token": storeConfig.accessToken },
     body: JSON.stringify({ query: queryText, variables })
   });
   const body = await response.json();
@@ -92,24 +138,24 @@ async function shopify(queryText, variables) {
   return body.data;
 }
 
-async function fetchOrders(start, end) {
+async function fetchOrders(storeConfig, start, end) {
   const result = [];
   let after = null;
   do {
-    const data = await shopify(query, { first: 250, after, search: searchFor(start, end) });
+    const data = await shopify(storeConfig, query, { first: 250, after, search: searchFor(start, end) });
     result.push(...data.orders.edges.map((edge) => edge.node));
     after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
   } while (after);
   return result;
 }
 
-function inRange(date, start, end) {
-  const key = dateKey(new Date(date));
+function inRange(date, start, end, timezone) {
+  const key = dateKey(new Date(date), timezone);
   return key >= start && key < end;
 }
 
-function aggregate(orders, start, end) {
-  const included = orders.filter((o) => o.createdAt && inRange(o.createdAt, start, end) && !o.cancelledAt && !o.test);
+function aggregate(orders, start, end, timezone) {
+  const included = orders.filter((o) => o.createdAt && inRange(o.createdAt, start, end, timezone) && !o.cancelledAt && !o.test);
   const currency = included.find((o) => o.currencyCode)?.currencyCode || "USD";
   const fulfilled = included.filter((o) => o.displayFulfillmentStatus === "FULFILLED").length;
   const partiallyFulfilled = included.filter((o) => o.displayFulfillmentStatus === "PARTIALLY_FULFILLED").length;
@@ -130,8 +176,8 @@ function pct(current, previous) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
-function buildMessage(period, current, previous) {
-  const title = `📊 Shopify ${period.label}｜${period.start} 至 ${addDays(period.end, -1)}`;
+function buildMessage(storeConfig, period, current, previous) {
+  const title = `📊 Shopify ${storeConfig.name}｜${period.label}｜${period.start} 至 ${addDays(period.end, -1)}`;
   return [
     title,
     "",
@@ -149,8 +195,8 @@ function buildMessage(period, current, previous) {
   ].join("\n");
 }
 
-async function sendFeishu(text) {
-  const response = await fetch(process.env.FEISHU_WEBHOOK_URL, {
+async function sendFeishu(storeConfig, text) {
+  const response = await fetch(storeConfig.feishuWebhookUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ msg_type: "text", content: { text } })
@@ -159,11 +205,25 @@ async function sendFeishu(text) {
   if (!response.ok || body.code) throw new Error(`Feishu webhook error: ${JSON.stringify(body)}`);
 }
 
-const period = periodFor(reportType);
-const previous = periodFor(reportType, new Date(`${period.start}T00:00:00Z`));
-const orders = await fetchOrders(previous.start, period.end);
-const currentMetrics = aggregate(orders, period.start, period.end);
-const previousMetrics = aggregate(orders, previous.start, period.start);
-const message = buildMessage(period, currentMetrics, previousMetrics);
-await sendFeishu(message);
-console.log(JSON.stringify({ reportType, period, orderCount: currentMetrics.orderCount, message }, null, 2));
+const stores = readStores();
+const failures = [];
+
+for (const storeConfig of stores) {
+  try {
+    const period = periodFor(reportType, storeConfig.timezone);
+    const previous = previousPeriod(period);
+    const orders = await fetchOrders(storeConfig, previous.start, period.end);
+    const currentMetrics = aggregate(orders, period.start, period.end, storeConfig.timezone);
+    const previousMetrics = aggregate(orders, previous.start, period.start, storeConfig.timezone);
+    const message = buildMessage(storeConfig, period, currentMetrics, previousMetrics);
+    await sendFeishu(storeConfig, message);
+    console.log(JSON.stringify({ store: storeConfig.store, reportType, period, orderCount: currentMetrics.orderCount }, null, 2));
+  } catch (error) {
+    failures.push(`${storeConfig.name} (${storeConfig.store}): ${error.message}`);
+    console.error(`Report failed for ${storeConfig.store}:`, error);
+  }
+}
+
+if (failures.length > 0) {
+  throw new Error(`One or more store reports failed:\n${failures.join("\n")}`);
+}

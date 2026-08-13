@@ -15,9 +15,7 @@ jobs:
           node-version: 20
       - name: Run daily report
         env:
-          SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
-          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
-          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
           SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
           SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
           REPORT_TYPE: daily
