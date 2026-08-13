@@ -59,7 +59,7 @@ query Orders($first: Int!, $after: String, $search: String!) {
     pageInfo { hasNextPage endCursor }
     edges { node {
       id name createdAt processedAt updatedAt cancelledAt test
-      displayFinancialStatus displayFulfillmentStatus currencyCode
+      displayFinancialStatus displayFulfillmentStatus riskLevel currencyCode
       currentTotalPriceSet { shopMoney { amount currencyCode } }
       totalPriceSet { shopMoney { amount currencyCode } }
       totalRefundedSet { shopMoney { amount currencyCode } }
@@ -120,6 +120,54 @@ function money(set) {
 
 function lineItems(order) {
   return (order.lineItems?.edges || []).map((edge) => edge.node);
+}
+
+const singleValueSkus = new Set(["TN10P051", "TN10P052", "TN10P053", "TN10P011", "TN10P012", "TN10P013", "X0051AFG1N"]);
+const allowedSuffixValues = new Set([2, 3, 5, 10, 50, 100, 300]);
+const presaleTitleKeywords = ["presale", "pre-sale", "voucher", "privilege voucher"];
+
+function normalizedSku(value) {
+  return String(value || "").trim().toUpperCase() || "(无 SKU)";
+}
+
+function skuUnitValue(rawSku) {
+  const sku = normalizedSku(rawSku);
+  if (singleValueSkus.has(sku)) return 1;
+  const match = sku.match(/^(TN10P011|TN10P012|TN10P013)-(\d+)$/);
+  if (!match || !allowedSuffixValues.has(Number(match[2]))) return 1;
+  return Number(match[2]);
+}
+
+function skuColor(rawSku, title = "") {
+  const sku = normalizedSku(rawSku);
+  if (presaleTitleKeywords.some((keyword) => String(title).toLowerCase().includes(keyword))) return "预售";
+  if (sku === "X0051AFG1N" || sku === "TN10P011" || sku === "TN10P051" || sku.startsWith("TN10P011-")) return "黑色";
+  if (sku === "TN10P012" || sku === "TN10P052" || sku.startsWith("TN10P012-")) return "银色";
+  if (sku === "TN10P013" || sku === "TN10P053" || sku.startsWith("TN10P013-")) return "橙色";
+  return "未分类";
+}
+
+function orderUnits(order) {
+  return lineItems(order).reduce((sum, item) => sum + Number(item.quantity || 0) * skuUnitValue(item.sku), 0);
+}
+
+function fulfillmentLabel(order) {
+  const labels = {
+    FULFILLED: "已发货",
+    PARTIALLY_FULFILLED: "部分发货",
+    UNFULFILLED: "待发货",
+    ON_HOLD: "暂停发货",
+    SCHEDULED: "已排期",
+    IN_PROGRESS: "处理中",
+    RESTOCKED: "已补货",
+    REQUEST_DECLINED: "发货请求拒绝",
+  };
+  return labels[order.displayFulfillmentStatus] || order.displayFulfillmentStatus || "未知";
+}
+
+function riskLabel(value) {
+  const labels = { LOW: "低", MEDIUM: "中", HIGH: "高" };
+  return labels[value] || value || "未知";
 }
 
 function searchFor(start, end) {
@@ -184,10 +232,25 @@ function aggregate(orders, start, end, timezone) {
   const fulfilled = included.filter((o) => o.displayFulfillmentStatus === "FULFILLED").length;
   const partiallyFulfilled = included.filter((o) => o.displayFulfillmentStatus === "PARTIALLY_FULFILLED").length;
   const unfulfilled = included.filter((o) => ["UNFULFILLED", "ON_HOLD"].includes(o.displayFulfillmentStatus)).length;
-  const units = included.reduce((sum, o) => sum + lineItems(o).reduce((n, item) => n + Number(item.quantity || 0), 0), 0);
+  const units = included.reduce((sum, o) => sum + orderUnits(o), 0);
   const sales = included.reduce((sum, o) => sum + money(o.currentTotalPriceSet || o.totalPriceSet), 0);
   const refunds = included.reduce((sum, o) => sum + money(o.totalRefundedSet), 0);
-  return { orderCount: included.length, units, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency };
+  const skuMap = new Map();
+  for (const order of included) {
+    for (const item of lineItems(order)) {
+      const sku = normalizedSku(item.sku);
+      const color = skuColor(item.sku, item.title);
+      const quantity = Number(item.quantity || 0) * skuUnitValue(item.sku);
+      const key = `${sku}\u0000${color}`;
+      const row = skuMap.get(key) || { sku, color, quantity: 0 };
+      row.quantity += quantity;
+      skuMap.set(key, row);
+    }
+  }
+  const orderDetails = included
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+    .map((order) => ({ name: order.name || order.id, risk: riskLabel(order.riskLevel), fulfillment: fulfillmentLabel(order), units: orderUnits(order) }));
+  return { orderCount: included.length, units, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), orderDetails };
 }
 
 function fmtMoney(value, currency) {
@@ -200,9 +263,9 @@ function pct(current, previous) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
-function buildMessage(storeConfig, period, current, previous) {
+function buildMessages(storeConfig, period, current, previous) {
   const title = `📊 Shopify ${storeConfig.name}｜${period.label}｜${period.start} 至 ${addDays(period.end, -1)}`;
-  return [
+  const summary = [
     title,
     "",
     `订单数：${current.orderCount}（${pct(current.orderCount, previous.orderCount)}）`,
@@ -215,8 +278,27 @@ function buildMessage(storeConfig, period, current, previous) {
     `部分发货订单：${current.partiallyFulfilled}`,
     `待发货订单：${current.unfulfilled}`,
     "",
-    "请查看 Shopify 看板或后台详情。"
-  ].join("\n");
+    "SKU 销量明细：",
+    "SKU | 颜色 | 销量",
+    ...current.skuSummary.map((row) => `${row.sku} | ${row.color} | ${row.quantity}`),
+    "",
+    "订单明细：",
+    "订单号 | 风险等级 | 发货状态 | 销量",
+  ];
+  const orderLines = current.orderDetails.map((row) => `${row.name} | ${row.risk} | ${row.fulfillment} | ${row.units}`);
+  const messages = [];
+  let chunk = summary.join("\n");
+  for (const line of orderLines) {
+    if ((chunk + "\n" + line).length > 26000) {
+      messages.push(chunk);
+      chunk = `${title}（订单明细续）\n订单号 | 风险等级 | 发货状态 | 销量\n${line}`;
+    } else {
+      chunk += `\n${line}`;
+    }
+  }
+  chunk += "\n\n请查看 Shopify 看板或后台详情。";
+  messages.push(chunk);
+  return messages;
 }
 
 async function sendFeishu(storeConfig, text) {
@@ -239,8 +321,8 @@ for (const storeConfig of stores) {
     const orders = await fetchOrders(storeConfig, previous.start, period.end);
     const currentMetrics = aggregate(orders, period.start, period.end, storeConfig.timezone);
     const previousMetrics = aggregate(orders, previous.start, period.start, storeConfig.timezone);
-    const message = buildMessage(storeConfig, period, currentMetrics, previousMetrics);
-    await sendFeishu(storeConfig, message);
+    const messages = buildMessages(storeConfig, period, currentMetrics, previousMetrics);
+    for (const message of messages) await sendFeishu(storeConfig, message);
     console.log(JSON.stringify({ store: storeConfig.store, reportType, period, orderCount: currentMetrics.orderCount }, null, 2));
   } catch (error) {
     failures.push(`${storeConfig.name} (${storeConfig.store}): ${error.message}`);
