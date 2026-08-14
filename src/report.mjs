@@ -159,9 +159,9 @@ function skuColor(rawSku, title = "", variant = null) {
   if (presaleTitleKeywords.some((keyword) => String(title).toLowerCase().includes(keyword))) return "预售";
   const shopifyColor = variantColor(variant);
   if (shopifyColor) return shopifyColor;
-  if (sku === "X0051AFG1N" || sku === "TN10P011" || sku === "TN10P051" || sku.startsWith("TN10P011-")) return "黑色";
-  if (sku === "TN10P012" || sku === "TN10P052" || sku.startsWith("TN10P012-")) return "银色";
-  if (sku === "TN10P013" || sku === "TN10P053" || sku.startsWith("TN10P013-")) return "橙色";
+  if (sku === "X0051AFG1N" || sku === "TN10P011" || sku === "TN10P051" || sku === "TN20P011" || sku.startsWith("TN10P011-")) return "黑色";
+  if (sku === "TN10P012" || sku === "TN10P052" || sku === "TN20P012" || sku.startsWith("TN10P012-")) return "银色";
+  if (sku === "TN10P013" || sku === "TN10P053" || sku === "TN20P014" || sku.startsWith("TN10P013-")) return sku === "TN20P014" ? "樱桃红" : "橙色";
   return "未分类";
 }
 
