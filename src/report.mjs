@@ -333,18 +333,9 @@ function aggregate(orders, start, end, timezone) {
   const sales = included.reduce((sum, o) => sum + money(o.currentTotalPriceSet || o.totalPriceSet), 0);
   const refunds = included.reduce((sum, o) => sum + money(o.totalRefundedSet), 0);
   const skuMap = new Map();
-  const finalPaymentDetails = [];
   for (const order of included) {
     for (const item of lineItems(order)) {
-      if (isFinalPaymentItem(item)) {
-        finalPaymentDetails.push({
-          order: order.name || order.id,
-          matchedOrder: item.matchedOrderName || "待匹配",
-          sku: item.matchedSku || "待匹配",
-          color: item.matchedColor || "尾款",
-        });
-        continue;
-      }
+      if (isFinalPaymentItem(item)) continue;
       const sku = normalizedSku(item.sku);
       const color = skuColor(item.sku, item.title, item.variant);
       const quantity = Number(item.quantity || 0) * skuUnitValue(item.sku);
@@ -357,7 +348,7 @@ function aggregate(orders, start, end, timezone) {
   const orderDetails = included
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
     .map((order) => ({ name: order.name || order.id, risk: riskLabel(order.riskLevel), fulfillment: fulfillmentLabel(order), units: orderUnits(order) }));
-  return { orderCount: included.length, units, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), finalPaymentDetails, orderDetails };
+  return { orderCount: included.length, units, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), orderDetails };
 }
 
 function missingSkuDiagnostics(orders, start, end, timezone) {
@@ -413,12 +404,6 @@ function buildMessages(storeConfig, period, current, previous) {
     "SKU 销量明细：",
     "SKU | 颜色 | 销量",
     ...current.skuSummary.map((row) => `${row.sku} | ${row.color} | ${row.quantity}`),
-    ...(current.finalPaymentDetails.length > 0 ? [
-      "",
-      "尾款匹配明细：",
-      "尾款订单 | 关联预售订单 | SKU | 颜色",
-      ...current.finalPaymentDetails.map((row) => `${row.order} | ${row.matchedOrder} | ${row.sku} | ${row.color}`),
-    ] : []),
     "",
     "订单明细：",
     "订单号 | 风险等级 | 发货状态 | 销量",
