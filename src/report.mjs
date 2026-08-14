@@ -378,7 +378,7 @@ function kpiColumn(label, value, change = "") {
     tag: "column",
     width: "weighted",
     weight: 1,
-    elements: [markdown(`**${label}**\n${value}${change ? `\n${change}` : ""}`)],
+    elements: [markdown(`**${label}**\n${value}${change ? `（${change}）` : ""}`)],
   };
 }
 
