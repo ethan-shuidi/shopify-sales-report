@@ -41,6 +41,12 @@ function normalizeStore(config, index) {
   if (!store || (!accessToken && (!clientId || !clientSecret)) || !feishuWebhookUrl) {
     throw new Error(`Store config ${index + 1} requires store, clientId/clientSecret (or accessToken), and feishuWebhookUrl`);
   }
+  const timezone = config.timezone || process.env.SHOPIFY_TIMEZONE || "America/Los_Angeles";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
+  } catch (error) {
+    throw new Error(`Store config ${index + 1} has invalid IANA timezone "${timezone}": ${error.message}`);
+  }
   return {
     name,
     store,
@@ -49,7 +55,7 @@ function normalizeStore(config, index) {
     clientSecret,
     feishuWebhookUrl,
     apiVersion: config.apiVersion || process.env.SHOPIFY_API_VERSION || "2026-07",
-    timezone: config.timezone || process.env.SHOPIFY_TIMEZONE || "America/Los_Angeles",
+    timezone,
   };
 }
 
@@ -323,7 +329,13 @@ for (const storeConfig of stores) {
     const previousMetrics = aggregate(orders, previous.start, period.start, storeConfig.timezone);
     const messages = buildMessages(storeConfig, period, currentMetrics, previousMetrics);
     for (const message of messages) await sendFeishu(storeConfig, message);
-    console.log(JSON.stringify({ store: storeConfig.store, reportType, period, orderCount: currentMetrics.orderCount }, null, 2));
+    console.log(JSON.stringify({
+      store: storeConfig.store,
+      timezone: storeConfig.timezone,
+      reportType,
+      period,
+      orderCount: currentMetrics.orderCount,
+    }, null, 2));
   } catch (error) {
     failures.push(`${storeConfig.name} (${storeConfig.store}): ${error.message}`);
     console.error(`Report failed for ${storeConfig.store}:`, error);

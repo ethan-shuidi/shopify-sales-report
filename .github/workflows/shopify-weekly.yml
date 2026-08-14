@@ -1,8 +1,6 @@
 name: Shopify weekly report
 
 on:
-  schedule:
-    - cron: "17 1 * * 1"
   workflow_dispatch:
 
 jobs:
