@@ -131,6 +131,7 @@ function lineItems(order) {
 
 const singleValueSkus = new Set(["TN10P051", "TN10P052", "TN10P053", "TN10P011", "TN10P012", "TN10P013", "X0051AFG1N"]);
 const allowedSuffixValues = new Set([2, 3, 5, 10, 50, 100, 300]);
+const finalPaymentTitleKeywords = ["final payment", "balance payment", "remaining payment", "balance due"];
 const presaleTitleKeywords = ["presale", "pre-sale", "voucher", "privilege voucher"];
 
 function normalizedSku(value) {
@@ -156,6 +157,7 @@ function variantColor(variant) {
 
 function skuColor(rawSku, title = "", variant = null) {
   const sku = normalizedSku(rawSku);
+  if (finalPaymentTitleKeywords.some((keyword) => String(title).toLowerCase().includes(keyword))) return "尾款";
   if (presaleTitleKeywords.some((keyword) => String(title).toLowerCase().includes(keyword))) return "预售";
   const shopifyColor = variantColor(variant);
   if (shopifyColor) return shopifyColor;
