@@ -2,8 +2,8 @@ name: Shopify daily report
 
 on:
   schedule:
-    # 02:55 UTC = 10:55 Asia/Shanghai; temporary scheduling test.
-    - cron: "55 2 * * *"
+    # Temporary diagnostic: GitHub's minimum supported schedule interval.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
