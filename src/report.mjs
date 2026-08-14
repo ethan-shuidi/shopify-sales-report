@@ -331,6 +331,12 @@ function pct(current, previous) {
 }
 
 function makeTable(columns, rows) {
+  for (const [index, column] of columns.entries()) {
+    const pixelWidth = String(column.width || "").match(/^(\d+)px$/);
+    if (pixelWidth && (Number(pixelWidth[1]) < 80 || Number(pixelWidth[1]) > 600)) {
+      throw new Error(`Feishu table column ${index + 1} width must be between 80px and 600px; got ${column.width}`);
+    }
+  }
   return {
     tag: "table",
     columns,
@@ -438,7 +444,7 @@ function buildMessages(storeConfig, period, current, previous) {
     { name: "name", display_name: "订单号", data_type: "text", width: "auto" },
     { name: "risk", display_name: "风险等级", data_type: "text", width: "80px" },
     { name: "fulfillment", display_name: "发货状态", data_type: "text", width: "auto" },
-    { name: "units", display_name: "销量", data_type: "number", width: "70px" },
+    { name: "units", display_name: "销量", data_type: "number", width: "80px" },
   ];
   const orderChunkSize = 50;
   for (let offset = 0; offset < orderRows.length; offset += orderChunkSize) {
