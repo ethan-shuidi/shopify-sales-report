@@ -72,10 +72,6 @@ query Orders($first: Int!, $after: String, $search: String!) {
       totalRefundedSet { shopMoney { amount currencyCode } }
       lineItems(first: 250) { edges { node {
         id title sku quantity
-        variant {
-          id title
-          selectedOptions { name value }
-        }
       } } }
       fulfillments(first: 100) {
         id status createdAt updatedAt deliveredAt inTransitAt
