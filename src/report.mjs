@@ -271,8 +271,13 @@ function aggregate(orders, start, end, timezone) {
   const sales = included.reduce((sum, o) => sum + money(o.currentTotalPriceSet || o.totalPriceSet), 0);
   const refunds = included.reduce((sum, o) => sum + money(o.totalRefundedSet), 0);
   const skuMap = new Map();
+  const dailyMap = new Map();
+  for (let day = start; day < end; day = addDays(day, 1)) {
+    dailyMap.set(day, { date: day, units: 0, skuMap: new Map() });
+  }
   const abnormalOrderIds = new Set();
   for (const order of included) {
+    const daily = dailyMap.get(dateKey(new Date(order.createdAt), timezone));
     for (const item of lineItems(order)) {
       if (isFinalPaymentItem(item)) {
         if (!String(item.sku || "").trim()) abnormalOrderIds.add(order.name || order.id);
@@ -286,12 +291,23 @@ function aggregate(orders, start, end, timezone) {
       const row = skuMap.get(key) || { sku, color, quantity: 0 };
       row.quantity += quantity;
       skuMap.set(key, row);
+      if (daily) {
+        daily.units += quantity;
+        const dailyRow = daily.skuMap.get(key) || { sku, color, quantity: 0 };
+        dailyRow.quantity += quantity;
+        daily.skuMap.set(key, dailyRow);
+      }
     }
   }
   const orderDetails = included
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
     .map((order) => ({ name: order.name || order.id, risk: riskLabel(order.riskLevel), fulfillment: fulfillmentLabel(order), units: orderUnits(order) }));
-  return { orderCount: included.length, units, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), abnormalOrderIds: [...abnormalOrderIds], orderDetails };
+  const dailySummary = [...dailyMap.values()].map((row) => ({
+    date: row.date,
+    units: row.units,
+    skuSummary: [...row.skuMap.values()].sort((a, b) => b.quantity - a.quantity),
+  }));
+  return { orderCount: included.length, units, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), dailySummary, abnormalOrderIds: [...abnormalOrderIds], orderDetails };
 }
 
 function missingSkuDiagnostics(orders, start, end, timezone) {
@@ -366,7 +382,7 @@ function kpiColumn(label, value, change = "") {
   };
 }
 
-function makeCard(title, elements) {
+function makeCard(title, elements, template = "blue") {
   return {
     schema: "2.0",
     config: {
@@ -374,7 +390,7 @@ function makeCard(title, elements) {
       summary: { content: title },
     },
     header: {
-      template: "blue",
+      template,
       title: { tag: "plain_text", content: title },
     },
     body: {
@@ -385,14 +401,82 @@ function makeCard(title, elements) {
   };
 }
 
+function skuKey(row) {
+  return `${row.sku}\u0000${row.color}`;
+}
+
+function skuLabel(row) {
+  return `${row.sku} / ${row.color}`;
+}
+
+function signedNumber(value) {
+  return `${value > 0 ? "+" : ""}${value}`;
+}
+
+function periodComparisonRows(current, previous) {
+  const currentMap = new Map(current.skuSummary.map((row) => [skuKey(row), row]));
+  const previousMap = new Map(previous.skuSummary.map((row) => [skuKey(row), row]));
+  const keys = [...new Set([...currentMap.keys(), ...previousMap.keys()])]
+    .sort((a, b) => (currentMap.get(b)?.quantity || 0) - (currentMap.get(a)?.quantity || 0));
+  return [
+    {
+      item: "全部商品",
+      current: current.units,
+      previous: previous.units,
+      delta: signedNumber(current.units - previous.units),
+      growth: pct(current.units, previous.units),
+    },
+    ...keys.map((key) => {
+      const currentRow = currentMap.get(key);
+      const previousRow = previousMap.get(key);
+      const currentQuantity = currentRow?.quantity || 0;
+      const previousQuantity = previousRow?.quantity || 0;
+      return {
+        item: skuLabel(currentRow || previousRow),
+        current: currentQuantity,
+        previous: previousQuantity,
+        delta: signedNumber(currentQuantity - previousQuantity),
+        growth: pct(currentQuantity, previousQuantity),
+      };
+    }),
+  ];
+}
+
+function dailySalesTable(current) {
+  const skuRows = current.skuSummary;
+  const columns = [
+    { name: "date", display_name: "日期", data_type: "text", width: "110px" },
+    { name: "total", display_name: "合计", data_type: "number", width: "80px" },
+    ...skuRows.map((row, index) => ({
+      name: `sku_${index}`,
+      display_name: skuLabel(row),
+      data_type: "number",
+      width: "120px",
+    })),
+  ];
+  const rows = current.dailySummary.map((daily) => {
+    const quantities = new Map(daily.skuSummary.map((row) => [skuKey(row), row.quantity]));
+    const result = { date: daily.date.replaceAll("-", "/"), total: daily.units };
+    skuRows.forEach((row, index) => {
+      result[`sku_${index}`] = quantities.get(skuKey(row)) || 0;
+    });
+    return result;
+  });
+  return makeTable(columns, rows);
+}
+
 function buildMessages(storeConfig, period, current, previous) {
   const dateLabel = `${period.start} 至 ${addDays(period.end, -1)}`;
   const title = `📊 Shopify ${storeConfig.name}｜${period.label}｜${dateLabel}`;
+  const headerTemplate = period.label === "周报" ? "green" : period.label === "月报" ? "purple" : "blue";
   const skuRows = current.skuSummary.map((row) => ({
     sku: row.sku,
     color: row.color,
     quantity: row.quantity,
   }));
+  const isDaily = period.label === "日报";
+  const dayCount = current.dailySummary.length || 1;
+  const averageDailyUnits = Number((current.units / dayCount).toFixed(1));
   const elements = [
     {
       tag: "column_set",
@@ -411,12 +495,35 @@ function buildMessages(storeConfig, period, current, previous) {
       columns: [
         kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
         kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
-        kpiColumn("已发货", current.fulfilled),
+        isDaily
+          ? kpiColumn("已发货", current.fulfilled)
+          : kpiColumn("日均销量", averageDailyUnits, pct(averageDailyUnits, Number((previous.units / (previous.dailySummary.length || 1)).toFixed(1)))),
       ],
     },
     markdown(`**发货状态**　部分发货：${current.partiallyFulfilled}　待发货：${current.unfulfilled}`),
-    markdown("**SKU 销量明细**"),
   ];
+
+  if (!isDaily) {
+    elements.push(
+      markdown(`**${period.label === "周报" ? "周期" : "月度"}对比**`),
+      makeTable([
+        { name: "item", display_name: "商品", data_type: "text", width: "auto" },
+        { name: "current", display_name: "本周期", data_type: "number", width: "80px" },
+        { name: "previous", display_name: "上周期", data_type: "number", width: "80px" },
+        { name: "delta", display_name: "增长量", data_type: "text", width: "80px" },
+        { name: "growth", display_name: "增长率", data_type: "text", width: "80px" },
+      ], periodComparisonRows(current, previous)),
+      markdown("**日销量明细**"),
+      dailySalesTable(current),
+    );
+    if (current.abnormalOrderIds.length > 0) {
+      elements.push(markdown(`<font color='red'>**异常订单（尾款缺少 SKU）**</font>\n${current.abnormalOrderIds.join("、")}`));
+    }
+    elements.push(markdown("统计周期与每日切分均按店铺配置时区计算。"));
+    return [makeCard(title, elements, headerTemplate)];
+  }
+
+  elements.push(markdown("**SKU 销量明细**"));
 
   if (skuRows.length > 0) {
     elements.push(makeTable([
@@ -433,7 +540,7 @@ function buildMessages(storeConfig, period, current, previous) {
   }
 
   elements.push(markdown("请查看 Shopify 看板或后台了解完整详情。"));
-  const messages = [makeCard(title, elements)];
+  const messages = [makeCard(title, elements, headerTemplate)];
   const orderRows = current.orderDetails.map((row) => ({
     name: row.name,
     risk: row.risk,
@@ -452,7 +559,7 @@ function buildMessages(storeConfig, period, current, previous) {
     messages.push(makeCard(`${title}｜订单明细 ${Math.floor(offset / orderChunkSize) + 1}`, [
       markdown(`**订单明细**　共 ${orderRows.length} 笔，本卡显示第 ${offset + 1}–${offset + chunk.length} 笔`),
       makeTable(orderColumns, chunk),
-    ]));
+    ], headerTemplate));
   }
   return messages;
 }
