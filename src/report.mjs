@@ -67,11 +67,13 @@ query Orders($first: Int!, $after: String, $search: String!) {
     edges { node {
       id name createdAt processedAt updatedAt cancelledAt test
       displayFinancialStatus displayFulfillmentStatus riskLevel currencyCode
+      customer { id }
+      note tags customAttributes { key value }
       currentTotalPriceSet { shopMoney { amount currencyCode } }
       totalPriceSet { shopMoney { amount currencyCode } }
       totalRefundedSet { shopMoney { amount currencyCode } }
       lineItems(first: 250) { edges { node {
-        id title sku quantity
+        id title sku quantity customAttributes { key value }
       } } }
       fulfillments(first: 100) {
         id status createdAt updatedAt deliveredAt inTransitAt
@@ -134,6 +136,27 @@ const allowedSuffixValues = new Set([2, 3, 5, 10, 50, 100, 300]);
 const finalPaymentTitleKeywords = ["final payment", "balance payment", "remaining payment", "balance due"];
 const presaleTitleKeywords = ["presale", "pre-sale", "voucher", "privilege voucher"];
 
+function titleMatches(title, keywords) {
+  const normalized = String(title || "").toLowerCase();
+  return keywords.some((keyword) => normalized.includes(keyword));
+}
+
+function isFinalPaymentItem(item) {
+  return titleMatches(item?.title, finalPaymentTitleKeywords);
+}
+
+function isPresaleItem(item) {
+  return titleMatches(item?.title, presaleTitleKeywords);
+}
+
+function baseProductTitle(title) {
+  let value = String(title || "").toLowerCase();
+  for (const keyword of [...finalPaymentTitleKeywords, ...presaleTitleKeywords]) {
+    value = value.replaceAll(keyword, " ");
+  }
+  return value.replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+}
+
 function normalizedSku(value) {
   return String(value || "").trim().toUpperCase() || "(无 SKU)";
 }
@@ -157,8 +180,8 @@ function variantColor(variant) {
 
 function skuColor(rawSku, title = "", variant = null) {
   const sku = normalizedSku(rawSku);
-  if (finalPaymentTitleKeywords.some((keyword) => String(title).toLowerCase().includes(keyword))) return "尾款";
-  if (presaleTitleKeywords.some((keyword) => String(title).toLowerCase().includes(keyword))) return "预售";
+  if (titleMatches(title, finalPaymentTitleKeywords)) return "尾款";
+  if (titleMatches(title, presaleTitleKeywords)) return "预售";
   const shopifyColor = variantColor(variant);
   if (shopifyColor) return shopifyColor;
   if (sku === "X0051AFG1N" || sku === "TN10P011" || sku === "TN10P051" || sku === "TN20P011" || sku.startsWith("TN10P011-")) return "黑色";
@@ -168,7 +191,64 @@ function skuColor(rawSku, title = "", variant = null) {
 }
 
 function orderUnits(order) {
-  return lineItems(order).reduce((sum, item) => sum + Number(item.quantity || 0) * skuUnitValue(item.sku), 0);
+  return lineItems(order).reduce((sum, item) => {
+    if (isFinalPaymentItem(item)) return sum;
+    return sum + Number(item.quantity || 0) * skuUnitValue(item.sku);
+  }, 0);
+}
+
+function attributeText(attributes) {
+  return (attributes || []).map((attribute) => `${attribute?.key || ""} ${attribute?.value || ""}`).join(" ");
+}
+
+function finalPaymentReferenceText(order, item) {
+  return [order.note, ...(order.tags || []), attributeText(order.customAttributes), attributeText(item.customAttributes)]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function uniqueSkuMatch(candidates) {
+  const distinctSkus = [...new Set(candidates.map((candidate) => candidate.sku))];
+  if (distinctSkus.length !== 1) return null;
+  return candidates
+    .filter((candidate) => candidate.sku === distinctSkus[0])
+    .sort((a, b) => String(b.order.createdAt).localeCompare(String(a.order.createdAt)))[0];
+}
+
+function resolveFinalPaymentMatches(orders) {
+  const validOrders = orders.filter((order) => !order.cancelledAt && !order.test);
+  for (const order of validOrders) {
+    const customerId = order.customer?.id;
+    for (const item of lineItems(order)) {
+      if (!isFinalPaymentItem(item) || String(item.sku || "").trim()) continue;
+
+      const referenceText = finalPaymentReferenceText(order, item);
+      const finalBaseTitle = baseProductTitle(item.title);
+      const candidates = validOrders
+        .filter((candidateOrder) => customerId && candidateOrder.customer?.id === customerId && String(candidateOrder.createdAt) < String(order.createdAt))
+        .flatMap((candidateOrder) => lineItems(candidateOrder).map((candidateItem) => ({
+          order: candidateOrder,
+          item: candidateItem,
+          sku: String(candidateItem.sku || "").trim().toUpperCase(),
+          baseTitle: baseProductTitle(candidateItem.title),
+          presale: isPresaleItem(candidateItem),
+        })))
+        .filter((candidate) => candidate.sku && !isFinalPaymentItem(candidate.item));
+
+      const referenced = candidates.filter((candidate) => referenceText && referenceText.includes(String(candidate.order.name || "").toLowerCase()));
+      const sameProduct = candidates.filter((candidate) => finalBaseTitle && candidate.baseTitle === finalBaseTitle);
+      const presale = candidates.filter((candidate) => candidate.presale);
+      const match = uniqueSkuMatch(referenced) || uniqueSkuMatch(sameProduct) || uniqueSkuMatch(presale) || uniqueSkuMatch(candidates);
+      if (!match) continue;
+
+      item.matchedSku = match.sku;
+      // Use the matched product SKU for color resolution; the source title contains
+      // "Presale" and would otherwise override the actual SKU color.
+      item.matchedColor = skuColor(match.sku, "", match.item.variant);
+      item.matchedOrderName = match.order.name || match.order.id;
+    }
+  }
 }
 
 function fulfillmentLabel(order) {
@@ -191,10 +271,7 @@ function riskLabel(value) {
 }
 
 function searchFor(start, end) {
-  // The end is exclusive. Add a three-day overlap so late refunds/fulfillments are refreshed.
-  const syncStart = addDays(start, -3);
-  const syncEnd = addDays(end, 1);
-  return `updated_at:>=${syncStart} updated_at:<${syncEnd}`;
+  return `created_at:>=${start} created_at:<${end}`;
 }
 
 async function getAccessToken(storeConfig) {
@@ -256,8 +333,18 @@ function aggregate(orders, start, end, timezone) {
   const sales = included.reduce((sum, o) => sum + money(o.currentTotalPriceSet || o.totalPriceSet), 0);
   const refunds = included.reduce((sum, o) => sum + money(o.totalRefundedSet), 0);
   const skuMap = new Map();
+  const finalPaymentDetails = [];
   for (const order of included) {
     for (const item of lineItems(order)) {
+      if (isFinalPaymentItem(item)) {
+        finalPaymentDetails.push({
+          order: order.name || order.id,
+          matchedOrder: item.matchedOrderName || "待匹配",
+          sku: item.matchedSku || "待匹配",
+          color: item.matchedColor || "尾款",
+        });
+        continue;
+      }
       const sku = normalizedSku(item.sku);
       const color = skuColor(item.sku, item.title, item.variant);
       const quantity = Number(item.quantity || 0) * skuUnitValue(item.sku);
@@ -270,7 +357,7 @@ function aggregate(orders, start, end, timezone) {
   const orderDetails = included
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
     .map((order) => ({ name: order.name || order.id, risk: riskLabel(order.riskLevel), fulfillment: fulfillmentLabel(order), units: orderUnits(order) }));
-  return { orderCount: included.length, units, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), orderDetails };
+  return { orderCount: included.length, units, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), finalPaymentDetails, orderDetails };
 }
 
 function missingSkuDiagnostics(orders, start, end, timezone) {
@@ -281,15 +368,15 @@ function missingSkuDiagnostics(orders, start, end, timezone) {
       const rawSku = String(item.sku || "").trim();
       const color = skuColor(item.sku, item.title, item.variant);
       const reasons = [];
-      if (!rawSku) reasons.push("无 SKU");
+      if (!rawSku && !item.matchedSku) reasons.push("无 SKU");
       if (color === "未分类") reasons.push("颜色未分类");
       if (reasons.length === 0) continue;
       rows.push({
         order: order.name || order.id,
         orderDate: dateKey(new Date(order.createdAt), timezone),
         title: item.title || "",
-        sku: rawSku || "(无 SKU)",
-        color,
+        sku: rawSku || item.matchedSku || "(无 SKU)",
+        color: item.matchedColor || color,
         quantity: Number(item.quantity || 0),
         reasons,
       });
@@ -326,6 +413,12 @@ function buildMessages(storeConfig, period, current, previous) {
     "SKU 销量明细：",
     "SKU | 颜色 | 销量",
     ...current.skuSummary.map((row) => `${row.sku} | ${row.color} | ${row.quantity}`),
+    ...(current.finalPaymentDetails.length > 0 ? [
+      "",
+      "尾款匹配明细：",
+      "尾款订单 | 关联预售订单 | SKU | 颜色",
+      ...current.finalPaymentDetails.map((row) => `${row.order} | ${row.matchedOrder} | ${row.sku} | ${row.color}`),
+    ] : []),
     "",
     "订单明细：",
     "订单号 | 风险等级 | 发货状态 | 销量",
@@ -363,7 +456,9 @@ for (const storeConfig of stores) {
   try {
     const period = periodFor(reportType, storeConfig.timezone);
     const previous = previousPeriod(period);
-    const orders = await fetchOrders(storeConfig, previous.start, period.end);
+    const matchingLookbackDays = Math.max(0, Number(process.env.FINAL_PAYMENT_LOOKBACK_DAYS || 180));
+    const orders = await fetchOrders(storeConfig, addDays(previous.start, -matchingLookbackDays), period.end);
+    resolveFinalPaymentMatches(orders);
     if (diagnoseMissingSku) {
       console.log(JSON.stringify({
         store: storeConfig.store,
