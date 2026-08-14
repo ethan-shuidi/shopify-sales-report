@@ -148,6 +148,10 @@ function isWarrantyItem(item) {
   return titleMatches(item?.title, warrantyTitleKeywords);
 }
 
+function isPresaleItem(item) {
+  return titleMatches(item?.title, presaleTitleKeywords);
+}
+
 function normalizedSku(value) {
   return String(value || "").trim().toUpperCase() || "(无 SKU)";
 }
@@ -171,9 +175,8 @@ function variantColor(variant) {
 
 function skuColor(rawSku, title = "", variant = null) {
   const sku = normalizedSku(rawSku);
-  if (titleMatches(title, finalPaymentTitleKeywords)) return "尾款";
   if (titleMatches(title, warrantyTitleKeywords)) return "延保服务";
-  if (titleMatches(title, presaleTitleKeywords)) return "预售";
+  if (!titleMatches(title, finalPaymentTitleKeywords) && titleMatches(title, presaleTitleKeywords)) return "预售";
   const shopifyColor = variantColor(variant);
   if (shopifyColor) return shopifyColor;
   if (sku === "X0051AFG1N" || sku === "TN10P011" || sku === "TN10P051" || sku === "TN20P011" || sku.startsWith("TN10P011-")) return "黑色";
@@ -184,7 +187,12 @@ function skuColor(rawSku, title = "", variant = null) {
 
 function orderUnits(order) {
   return lineItems(order).reduce((sum, item) => {
-    if (isFinalPaymentItem(item) || isWarrantyItem(item)) return sum;
+    if (isWarrantyItem(item)) return sum;
+    if (isFinalPaymentItem(item)) {
+      if (!String(item.sku || "").trim()) return sum;
+    } else if (isPresaleItem(item)) {
+      return sum;
+    }
     return sum + Number(item.quantity || 0) * skuUnitValue(item.sku);
   }, 0);
 }
@@ -266,7 +274,7 @@ function aggregate(orders, start, end, timezone) {
   const currency = included.find((o) => o.currencyCode)?.currencyCode || "USD";
   const fulfilled = included.filter((o) => o.displayFulfillmentStatus === "FULFILLED").length;
   const partiallyFulfilled = included.filter((o) => o.displayFulfillmentStatus === "PARTIALLY_FULFILLED").length;
-  const unfulfilled = included.filter((o) => ["UNFULFILLED", "ON_HOLD"].includes(o.displayFulfillmentStatus)).length;
+  const unfulfilled = included.length - fulfilled - partiallyFulfilled;
   const units = included.reduce((sum, o) => sum + orderUnits(o), 0);
   const sales = included.reduce((sum, o) => sum + money(o.currentTotalPriceSet || o.totalPriceSet), 0);
   const refunds = included.reduce((sum, o) => sum + money(o.totalRefundedSet), 0);
@@ -276,14 +284,20 @@ function aggregate(orders, start, end, timezone) {
     dailyMap.set(day, { date: day, units: 0, skuMap: new Map() });
   }
   const abnormalOrderIds = new Set();
+  let presaleUnits = 0;
   for (const order of included) {
     const daily = dailyMap.get(dateKey(new Date(order.createdAt), timezone));
     for (const item of lineItems(order)) {
+      if (isWarrantyItem(item)) continue;
       if (isFinalPaymentItem(item)) {
-        if (!String(item.sku || "").trim()) abnormalOrderIds.add(order.name || order.id);
+        if (!String(item.sku || "").trim()) {
+          abnormalOrderIds.add(order.name || order.id);
+          continue;
+        }
+      } else if (isPresaleItem(item)) {
+        presaleUnits += Number(item.quantity || 0) * skuUnitValue(item.sku);
         continue;
       }
-      if (isWarrantyItem(item)) continue;
       const sku = normalizedSku(item.sku);
       const color = skuColor(item.sku, item.title, item.variant);
       const quantity = Number(item.quantity || 0) * skuUnitValue(item.sku);
@@ -307,7 +321,7 @@ function aggregate(orders, start, end, timezone) {
     units: row.units,
     skuSummary: [...row.skuMap.values()].sort((a, b) => b.quantity - a.quantity),
   }));
-  return { orderCount: included.length, units, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), dailySummary, abnormalOrderIds: [...abnormalOrderIds], orderDetails };
+  return { orderCount: included.length, units, presaleUnits, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), dailySummary, abnormalOrderIds: [...abnormalOrderIds], orderDetails };
 }
 
 function missingSkuDiagnostics(orders, start, end, timezone) {
@@ -426,6 +440,13 @@ function periodComparisonRows(current, previous) {
       delta: signedNumber(current.units - previous.units),
       growth: pct(current.units, previous.units),
     },
+    {
+      item: "预售量",
+      current: current.presaleUnits,
+      previous: previous.presaleUnits,
+      delta: signedNumber(current.presaleUnits - previous.presaleUnits),
+      growth: pct(current.presaleUnits, previous.presaleUnits),
+    },
     ...keys.map((key) => {
       const currentRow = currentMap.get(key);
       const previousRow = previousMap.get(key);
@@ -492,13 +513,19 @@ function buildMessages(storeConfig, period, current, previous) {
       tag: "column_set",
       flex_mode: "none",
       horizontal_spacing: "small",
-      columns: [
-        kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
-        kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
-        isDaily
-          ? kpiColumn("已发货", current.fulfilled)
-          : kpiColumn("日均销量", averageDailyUnits, pct(averageDailyUnits, Number((previous.units / (previous.dailySummary.length || 1)).toFixed(1)))),
-      ],
+      columns: isDaily
+        ? [
+            kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
+            kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
+            kpiColumn("预售量", current.presaleUnits, pct(current.presaleUnits, previous.presaleUnits)),
+            kpiColumn("已发货", current.fulfilled),
+          ]
+        : [
+            kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
+            kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
+            kpiColumn("日均销量", averageDailyUnits, pct(averageDailyUnits, Number((previous.units / (previous.dailySummary.length || 1)).toFixed(1)))),
+            kpiColumn("预售量", current.presaleUnits, pct(current.presaleUnits, previous.presaleUnits)),
+          ],
     },
     markdown(`**发货状态**　部分发货：${current.partiallyFulfilled}　待发货：${current.unfulfilled}`),
   ];
