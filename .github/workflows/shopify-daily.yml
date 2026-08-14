@@ -2,6 +2,12 @@ name: Shopify daily report
 
 on:
   workflow_dispatch:
+    inputs:
+      diagnose_missing_sku:
+        description: Only print orders with missing or unclassified SKU
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   report:
@@ -17,4 +23,5 @@ jobs:
           SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
           SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
           REPORT_TYPE: daily
+          DIAGNOSE_MISSING_SKU: ${{ inputs.diagnose_missing_sku }}
         run: node src/report.mjs

@@ -1,4 +1,5 @@
 const reportType = (process.env.REPORT_TYPE || "daily").toLowerCase();
+const diagnoseMissingSku = String(process.env.DIAGNOSE_MISSING_SKU || "false").toLowerCase() === "true";
 
 function readStores() {
   if (process.env.SHOPIFY_STORES_JSON) {
@@ -259,6 +260,31 @@ function aggregate(orders, start, end, timezone) {
   return { orderCount: included.length, units, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), orderDetails };
 }
 
+function missingSkuDiagnostics(orders, start, end, timezone) {
+  const included = orders.filter((o) => o.createdAt && inRange(o.createdAt, start, end, timezone) && !o.cancelledAt && !o.test);
+  const rows = [];
+  for (const order of included) {
+    for (const item of lineItems(order)) {
+      const rawSku = String(item.sku || "").trim();
+      const color = skuColor(item.sku, item.title);
+      const reasons = [];
+      if (!rawSku) reasons.push("无 SKU");
+      if (color === "未分类") reasons.push("颜色未分类");
+      if (reasons.length === 0) continue;
+      rows.push({
+        order: order.name || order.id,
+        orderDate: dateKey(new Date(order.createdAt), timezone),
+        title: item.title || "",
+        sku: rawSku || "(无 SKU)",
+        color,
+        quantity: Number(item.quantity || 0),
+        reasons,
+      });
+    }
+  }
+  return rows;
+}
+
 function fmtMoney(value, currency) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(value);
 }
@@ -325,6 +351,16 @@ for (const storeConfig of stores) {
     const period = periodFor(reportType, storeConfig.timezone);
     const previous = previousPeriod(period);
     const orders = await fetchOrders(storeConfig, previous.start, period.end);
+    if (diagnoseMissingSku) {
+      console.log(JSON.stringify({
+        store: storeConfig.store,
+        timezone: storeConfig.timezone,
+        reportType,
+        period,
+        missingSkuDiagnostics: missingSkuDiagnostics(orders, period.start, period.end, storeConfig.timezone),
+      }, null, 2));
+      continue;
+    }
     const currentMetrics = aggregate(orders, period.start, period.end, storeConfig.timezone);
     const previousMetrics = aggregate(orders, previous.start, period.start, storeConfig.timezone);
     const messages = buildMessages(storeConfig, period, currentMetrics, previousMetrics);
