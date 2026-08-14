@@ -72,6 +72,10 @@ query Orders($first: Int!, $after: String, $search: String!) {
       totalRefundedSet { shopMoney { amount currencyCode } }
       lineItems(first: 250) { edges { node {
         id title sku quantity
+        variant {
+          id title
+          selectedOptions { name value }
+        }
       } } }
       fulfillments(first: 100) {
         id status createdAt updatedAt deliveredAt inTransitAt
@@ -145,9 +149,20 @@ function skuUnitValue(rawSku) {
   return Number(match[2]);
 }
 
-function skuColor(rawSku, title = "") {
+function variantColor(variant) {
+  const options = variant?.selectedOptions || [];
+  const colorOption = options.find((option) => {
+    const name = String(option?.name || "").trim().toLowerCase();
+    return name === "color" || name === "colour" || name === "颜色" || name.includes("color") || name.includes("colour");
+  });
+  return String(colorOption?.value || "").trim();
+}
+
+function skuColor(rawSku, title = "", variant = null) {
   const sku = normalizedSku(rawSku);
   if (presaleTitleKeywords.some((keyword) => String(title).toLowerCase().includes(keyword))) return "预售";
+  const shopifyColor = variantColor(variant);
+  if (shopifyColor) return shopifyColor;
   if (sku === "X0051AFG1N" || sku === "TN10P011" || sku === "TN10P051" || sku.startsWith("TN10P011-")) return "黑色";
   if (sku === "TN10P012" || sku === "TN10P052" || sku.startsWith("TN10P012-")) return "银色";
   if (sku === "TN10P013" || sku === "TN10P053" || sku.startsWith("TN10P013-")) return "橙色";
@@ -246,7 +261,7 @@ function aggregate(orders, start, end, timezone) {
   for (const order of included) {
     for (const item of lineItems(order)) {
       const sku = normalizedSku(item.sku);
-      const color = skuColor(item.sku, item.title);
+      const color = skuColor(item.sku, item.title, item.variant);
       const quantity = Number(item.quantity || 0) * skuUnitValue(item.sku);
       const key = `${sku}\u0000${color}`;
       const row = skuMap.get(key) || { sku, color, quantity: 0 };
@@ -266,7 +281,7 @@ function missingSkuDiagnostics(orders, start, end, timezone) {
   for (const order of included) {
     for (const item of lineItems(order)) {
       const rawSku = String(item.sku || "").trim();
-      const color = skuColor(item.sku, item.title);
+      const color = skuColor(item.sku, item.title, item.variant);
       const reasons = [];
       if (!rawSku) reasons.push("无 SKU");
       if (color === "未分类") reasons.push("颜色未分类");
