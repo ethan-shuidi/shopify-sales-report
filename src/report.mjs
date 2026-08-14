@@ -330,58 +330,132 @@ function pct(current, previous) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
+function makeTable(columns, rows) {
+  return {
+    tag: "table",
+    columns,
+    rows,
+    page_size: Math.min(10, Math.max(1, rows.length)),
+    row_height: "auto",
+    header_style: {
+      text_align: "center",
+      text_size: "normal",
+      background_style: "grey",
+      bold: true,
+      lines: 1,
+    },
+  };
+}
+
+function markdown(content) {
+  return { tag: "markdown", content };
+}
+
+function kpiColumn(label, value, change = "") {
+  return {
+    tag: "column",
+    width: "weighted",
+    weight: 1,
+    elements: [markdown(`**${label}**\n${value}${change ? `\n${change}` : ""}`)],
+  };
+}
+
+function makeCard(title, elements) {
+  return {
+    schema: "2.0",
+    config: {
+      width_mode: "fill",
+      summary: { content: title },
+    },
+    header: {
+      template: "blue",
+      title: { tag: "plain_text", content: title },
+    },
+    body: {
+      direction: "vertical",
+      padding: "12px 12px 12px 12px",
+      elements,
+    },
+  };
+}
+
 function buildMessages(storeConfig, period, current, previous) {
-  const title = `📊 Shopify ${storeConfig.name}｜${period.label}｜${period.start} 至 ${addDays(period.end, -1)}`;
-  const summary = [
-    title,
-    "",
-    `订单数：${current.orderCount}（${pct(current.orderCount, previous.orderCount)}）`,
-    `商品销量：${current.units}（${pct(current.units, previous.units)}）`,
-    `销售额：${fmtMoney(current.sales, current.currency)}（${pct(current.sales, previous.sales)}）`,
-    `退款金额：${fmtMoney(current.refunds, current.currency)}`,
-    `净销售额：${fmtMoney(current.netSales, current.currency)}`,
-    "",
-    `已发货订单：${current.fulfilled}`,
-    `部分发货订单：${current.partiallyFulfilled}`,
-    `待发货订单：${current.unfulfilled}`,
-    "",
-    "SKU 销量明细：",
-    "SKU | 颜色 | 销量",
-    ...current.skuSummary.map((row) => `${row.sku} | ${row.color} | ${row.quantity}`),
-    "",
-    "订单明细：",
-    "订单号 | 风险等级 | 发货状态 | 销量",
+  const dateLabel = `${period.start} 至 ${addDays(period.end, -1)}`;
+  const title = `📊 Shopify ${storeConfig.name}｜${period.label}｜${dateLabel}`;
+  const skuRows = current.skuSummary.map((row) => ({
+    sku: row.sku,
+    color: row.color,
+    quantity: row.quantity,
+  }));
+  const elements = [
+    {
+      tag: "column_set",
+      flex_mode: "none",
+      horizontal_spacing: "small",
+      columns: [
+        kpiColumn("订单数", current.orderCount, pct(current.orderCount, previous.orderCount)),
+        kpiColumn("商品销量", current.units, pct(current.units, previous.units)),
+        kpiColumn("销售额", fmtMoney(current.sales, current.currency), pct(current.sales, previous.sales)),
+      ],
+    },
+    {
+      tag: "column_set",
+      flex_mode: "none",
+      horizontal_spacing: "small",
+      columns: [
+        kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
+        kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
+        kpiColumn("已发货", current.fulfilled),
+      ],
+    },
+    markdown(`**发货状态**　部分发货：${current.partiallyFulfilled}　待发货：${current.unfulfilled}`),
+    markdown("**SKU 销量明细**"),
   ];
-  const orderLines = current.orderDetails.map((row) => `${row.name} | ${row.risk} | ${row.fulfillment} | ${row.units}`);
-  const messages = [];
-  let chunk = summary.join("\n");
-  for (const line of orderLines) {
-    if ((chunk + "\n" + line).length > 26000) {
-      messages.push(chunk);
-      chunk = `${title}（订单明细续）\n订单号 | 风险等级 | 发货状态 | 销量\n${line}`;
-    } else {
-      chunk += `\n${line}`;
-    }
+
+  if (skuRows.length > 0) {
+    elements.push(makeTable([
+      { name: "sku", display_name: "SKU", data_type: "text", width: "auto" },
+      { name: "color", display_name: "颜色", data_type: "text", width: "auto" },
+      { name: "quantity", display_name: "销量", data_type: "number", width: "80px" },
+    ], skuRows));
+  } else {
+    elements.push(markdown("本周期没有商品销量。"));
   }
+
   if (current.abnormalOrderIds.length > 0) {
-    const abnormalBlock = `\n\n异常订单（尾款缺少 SKU）：\n${current.abnormalOrderIds.join("\n")}`;
-    if ((chunk + abnormalBlock).length > 26000) {
-      messages.push(chunk);
-      chunk = `${title}（异常订单）${abnormalBlock}`;
-    } else {
-      chunk += abnormalBlock;
-    }
+    elements.push(markdown(`<font color='red'>**异常订单（尾款缺少 SKU）**</font>\n${current.abnormalOrderIds.join("、")}`));
   }
-  chunk += "\n\n请查看 Shopify 看板或后台详情。";
-  messages.push(chunk);
+
+  elements.push(markdown("请查看 Shopify 看板或后台了解完整详情。"));
+  const messages = [makeCard(title, elements)];
+  const orderRows = current.orderDetails.map((row) => ({
+    name: row.name,
+    risk: row.risk,
+    fulfillment: row.fulfillment,
+    units: row.units,
+  }));
+  const orderColumns = [
+    { name: "name", display_name: "订单号", data_type: "text", width: "auto" },
+    { name: "risk", display_name: "风险等级", data_type: "text", width: "80px" },
+    { name: "fulfillment", display_name: "发货状态", data_type: "text", width: "auto" },
+    { name: "units", display_name: "销量", data_type: "number", width: "70px" },
+  ];
+  const orderChunkSize = 50;
+  for (let offset = 0; offset < orderRows.length; offset += orderChunkSize) {
+    const chunk = orderRows.slice(offset, offset + orderChunkSize);
+    messages.push(makeCard(`${title}｜订单明细 ${Math.floor(offset / orderChunkSize) + 1}`, [
+      markdown(`**订单明细**　共 ${orderRows.length} 笔，本卡显示第 ${offset + 1}–${offset + chunk.length} 笔`),
+      makeTable(orderColumns, chunk),
+    ]));
+  }
   return messages;
 }
 
-async function sendFeishu(storeConfig, text) {
+async function sendFeishu(storeConfig, cardPayload) {
   const response = await fetch(storeConfig.feishuWebhookUrl, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ msg_type: "text", content: { text } })
+    body: JSON.stringify({ msg_type: "interactive", card: cardPayload })
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.code) throw new Error(`Feishu webhook error: ${JSON.stringify(body)}`);
