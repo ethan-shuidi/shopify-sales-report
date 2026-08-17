@@ -487,6 +487,56 @@ function dailySalesTable(current) {
   return makeTable(columns, rows);
 }
 
+function skuFamily(rawSku) {
+  const sku = normalizedSku(rawSku);
+  const match = sku.match(/^(TN\d+)/);
+  return match ? match[1] : "其他";
+}
+
+function skuMatrixTable(current) {
+  const familyTotals = new Map();
+  const colorFamilies = new Map();
+  for (const row of current.skuSummary) {
+    const family = skuFamily(row.sku);
+    familyTotals.set(family, (familyTotals.get(family) || 0) + row.quantity);
+    const colorMap = colorFamilies.get(row.color) || new Map();
+    colorMap.set(family, (colorMap.get(family) || 0) + row.quantity);
+    colorFamilies.set(row.color, colorMap);
+  }
+  const families = [...familyTotals.keys()].sort((a, b) => {
+    const order = ["TN10", "TN20", "其他"];
+    const aIndex = order.indexOf(a);
+    const bIndex = order.indexOf(b);
+    if (aIndex !== -1 || bIndex !== -1) return (aIndex === -1 ? order.length : aIndex) - (bIndex === -1 ? order.length : bIndex);
+    return a.localeCompare(b);
+  });
+  const preferredColors = ["黑色", "银色", "樱桃红", "橙色", "白色", "绿色", "蓝色", "紫色", "未分类", "其他"];
+  const colors = [...colorFamilies.keys()].sort((a, b) => {
+    const aIndex = preferredColors.indexOf(a);
+    const bIndex = preferredColors.indexOf(b);
+    if (aIndex !== -1 || bIndex !== -1) return (aIndex === -1 ? preferredColors.length : aIndex) - (bIndex === -1 ? preferredColors.length : bIndex);
+    return a.localeCompare(b);
+  });
+  const columns = [
+    { name: "color", display_name: "颜色", data_type: "text", width: "110px" },
+    ...families.map((family, index) => ({ name: `family_${index}`, display_name: family, data_type: "text", width: "100px" })),
+  ];
+  const rows = colors.map((color) => {
+    const colorMap = colorFamilies.get(color);
+    const row = { color };
+    families.forEach((family, index) => {
+      row[`family_${index}`] = colorMap.has(family) ? String(colorMap.get(family)) : "—";
+    });
+    return row;
+  });
+  const subtotal = { color: "小计" };
+  families.forEach((family, index) => {
+    subtotal[`family_${index}`] = familyTotals.has(family) ? String(familyTotals.get(family)) : "—";
+  });
+  rows.push(subtotal);
+  return makeTable(columns, rows);
+}
+
 function buildMessages(storeConfig, period, current, previous) {
   const dateLabel = `${period.start} 至 ${addDays(period.end, -1)}`;
   const title = `📊 Shopify ${storeConfig.name}｜${period.label}｜${dateLabel}`;
@@ -497,14 +547,23 @@ function buildMessages(storeConfig, period, current, previous) {
       : period.label === "近7日滚动报告"
         ? "orange"
         : "blue";
-  const skuRows = current.skuSummary.map((row) => ({
-    sku: row.sku,
-    color: row.color,
-    quantity: row.quantity,
-  }));
   const isDaily = period.label === "日报";
   const dayCount = current.dailySummary.length || 1;
   const averageDailyUnits = Number((current.units / dayCount).toFixed(1));
+  const secondaryColumns = isDaily
+    ? [
+        kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
+        kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
+      ]
+    : [
+        kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
+        kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
+        kpiColumn("日均销量", averageDailyUnits, pct(averageDailyUnits, Number((previous.units / (previous.dailySummary.length || 1)).toFixed(1)))),
+        kpiColumn("预售量", current.presaleUnits, pct(current.presaleUnits, previous.presaleUnits)),
+      ];
+  if (isDaily && current.presaleUnits > 0) {
+    secondaryColumns.push(kpiColumn("预售量", current.presaleUnits, pct(current.presaleUnits, previous.presaleUnits)));
+  }
   const elements = [
     {
       tag: "column_set",
@@ -520,24 +579,12 @@ function buildMessages(storeConfig, period, current, previous) {
       tag: "column_set",
       flex_mode: "none",
       horizontal_spacing: "small",
-      columns: isDaily
-        ? [
-            kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
-            kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
-            kpiColumn("预售量", current.presaleUnits, pct(current.presaleUnits, previous.presaleUnits)),
-            kpiColumn("已发货", current.fulfilled),
-          ]
-        : [
-            kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
-            kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
-            kpiColumn("日均销量", averageDailyUnits, pct(averageDailyUnits, Number((previous.units / (previous.dailySummary.length || 1)).toFixed(1)))),
-            kpiColumn("预售量", current.presaleUnits, pct(current.presaleUnits, previous.presaleUnits)),
-          ],
+      columns: secondaryColumns,
     },
-    markdown(`**发货状态**　部分发货：${current.partiallyFulfilled}　待发货：${current.unfulfilled}`),
   ];
 
   if (!isDaily) {
+    elements.push(markdown(`**发货状态**　已发货：${current.fulfilled}　部分发货：${current.partiallyFulfilled}　待发货：${current.unfulfilled}`));
     elements.push(
       markdown(`**${period.label === "周报" ? "周期" : "月度"}对比**`),
       makeTable([
@@ -559,12 +606,8 @@ function buildMessages(storeConfig, period, current, previous) {
 
   elements.push(markdown("**SKU 销量明细**"));
 
-  if (skuRows.length > 0) {
-    elements.push(makeTable([
-      { name: "sku", display_name: "SKU", data_type: "text", width: "auto" },
-      { name: "color", display_name: "颜色", data_type: "text", width: "auto" },
-      { name: "quantity", display_name: "销量", data_type: "number", width: "80px" },
-    ], skuRows));
+  if (current.skuSummary.length > 0) {
+    elements.push(skuMatrixTable(current));
   } else {
     elements.push(markdown("本周期没有商品销量。"));
   }
@@ -591,6 +634,7 @@ function buildMessages(storeConfig, period, current, previous) {
   for (let offset = 0; offset < orderRows.length; offset += orderChunkSize) {
     const chunk = orderRows.slice(offset, offset + orderChunkSize);
     messages.push(makeCard(`${title}｜订单明细 ${Math.floor(offset / orderChunkSize) + 1}`, [
+      markdown(`**发货汇总**　已发货：${current.fulfilled}　部分发货：${current.partiallyFulfilled}　待发货：${current.unfulfilled}`),
       markdown(`**订单明细**　共 ${orderRows.length} 笔，本卡显示第 ${offset + 1}–${offset + chunk.length} 笔`),
       makeTable(orderColumns, chunk),
     ], headerTemplate));
