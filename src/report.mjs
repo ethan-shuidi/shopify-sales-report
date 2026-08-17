@@ -74,7 +74,7 @@ query Orders($first: Int!, $after: String, $search: String!) {
       totalPriceSet { shopMoney { amount currencyCode } }
       totalRefundedSet { shopMoney { amount currencyCode } }
       lineItems(first: 250) { edges { node {
-        id title sku quantity
+        id title name variantTitle sku quantity
       } } }
       fulfillments(first: 100) {
         id status createdAt updatedAt deliveredAt inTransitAt
@@ -150,6 +150,14 @@ function isFinalPaymentItem(item) {
 
 function isWarrantyItem(item) {
   return titleMatches(item?.title, warrantyTitleKeywords);
+}
+
+function warrantyServiceLabel(item) {
+  const title = String(item?.title || "延保服务").trim() || "延保服务";
+  const variantTitle = String(item?.variantTitle || "").trim();
+  if (!variantTitle || variantTitle.toLowerCase() === "default title") return String(item?.name || title).trim() || title;
+  if (title.toLowerCase().includes(variantTitle.toLowerCase())) return title;
+  return `${title}（${variantTitle}）`;
 }
 
 function isPresaleItem(item) {
@@ -294,7 +302,7 @@ function aggregate(orders, start, end, timezone) {
     const daily = dailyMap.get(dateKey(new Date(order.createdAt), timezone));
     for (const item of lineItems(order)) {
       if (isWarrantyItem(item)) {
-        const title = String(item.title || "延保服务").trim() || "延保服务";
+        const title = warrantyServiceLabel(item);
         const orderId = order.name || order.id;
         const warrantyDate = dateKey(new Date(order.createdAt), timezone);
         const warrantyKey = `${warrantyDate}\u0000${orderId}\u0000${title}`;
@@ -513,26 +521,65 @@ function periodComparisonRows(current, previous) {
   ];
 }
 
+function familyColorKey(row) {
+  return `${skuFamily(row.sku)}\u0000${row.color}`;
+}
+
+function familyColorDimensions(skuSummary) {
+  const preferred = [
+    { family: "TN20", color: "黑色" },
+    { family: "TN20", color: "银色" },
+    { family: "TN20", color: "樱桃红" },
+    { family: "TN10", color: "黑色" },
+    { family: "TN10", color: "银色" },
+    { family: "TN10", color: "橙色" },
+  ].map((row) => ({ ...row, key: `${row.family}\u0000${row.color}` }));
+  const preferredKeys = new Set(preferred.map((row) => row.key));
+  const extras = [...new Map(skuSummary.map((row) => {
+    const family = skuFamily(row.sku);
+    const key = `${family}\u0000${row.color}`;
+    return [key, { key, family, color: row.color }];
+  })).values()]
+    .filter((row) => !preferredKeys.has(row.key))
+    .sort((a, b) => a.family.localeCompare(b.family) || a.color.localeCompare(b.color));
+  return [...preferred, ...extras];
+}
+
+function aggregateFamilyColors(skuSummary) {
+  const quantities = new Map();
+  for (const row of skuSummary) {
+    const key = familyColorKey(row);
+    quantities.set(key, (quantities.get(key) || 0) + row.quantity);
+  }
+  return quantities;
+}
+
 function dailySalesTable(current) {
-  const skuRows = current.skuSummary;
+  const dimensions = familyColorDimensions(current.skuSummary);
+  const totals = aggregateFamilyColors(current.skuSummary);
   const columns = [
     { name: "date", display_name: "日期", data_type: "text", width: "110px" },
     { name: "total", display_name: "合计", data_type: "number", width: "80px" },
-    ...skuRows.map((row, index) => ({
-      name: `sku_${index}`,
-      display_name: `${skuFamily(row.sku)}${row.color}`,
+    ...dimensions.map((row, index) => ({
+      name: `variant_${index}`,
+      display_name: `${row.family}${row.color}`,
       data_type: "number",
-      width: "120px",
+      width: "100px",
     })),
   ];
   const rows = current.dailySummary.map((daily) => {
-    const quantities = new Map(daily.skuSummary.map((row) => [skuKey(row), row.quantity]));
+    const quantities = aggregateFamilyColors(daily.skuSummary);
     const result = { date: daily.date.replaceAll("-", "/"), total: daily.units };
-    skuRows.forEach((row, index) => {
-      result[`sku_${index}`] = quantities.get(skuKey(row)) || 0;
+    dimensions.forEach((row, index) => {
+      result[`variant_${index}`] = quantities.get(row.key) || 0;
     });
     return result;
   });
+  const summary = { date: "合计", total: current.units };
+  dimensions.forEach((row, index) => {
+    summary[`variant_${index}`] = totals.get(row.key) || 0;
+  });
+  rows.push(summary);
   return makeTable(columns, rows);
 }
 
@@ -569,10 +616,14 @@ function skuMatrixTable(current) {
   const columns = [
     { name: "color", display_name: "颜色", data_type: "text", width: "110px" },
     ...families.map((family, index) => ({ name: `family_${index}`, display_name: family, data_type: "text", width: "100px" })),
+    { name: "total", display_name: "合计", data_type: "text", width: "80px" },
   ];
   const rows = colors.map((color) => {
     const colorMap = colorFamilies.get(color);
-    const row = { color };
+    const row = {
+      color,
+      total: String([...colorMap.values()].reduce((sum, quantity) => sum + quantity, 0)),
+    };
     families.forEach((family, index) => {
       row[`family_${index}`] = colorMap.has(family) ? String(colorMap.get(family)) : "—";
     });
@@ -582,6 +633,7 @@ function skuMatrixTable(current) {
   families.forEach((family, index) => {
     subtotal[`family_${index}`] = familyTotals.has(family) ? String(familyTotals.get(family)) : "—";
   });
+  subtotal.total = String([...familyTotals.values()].reduce((sum, quantity) => sum + quantity, 0));
   rows.push(subtotal);
   return makeTable(columns, rows);
 }
@@ -608,7 +660,7 @@ function appendWarrantyDetails(elements, current) {
 
 function buildMessages(storeConfig, period, current, previous) {
   const dateLabel = `${period.start} 至 ${addDays(period.end, -1)}`;
-  const title = `📊 Shopify ${storeConfig.name}（${storeConfig.market}）｜${period.label}｜${dateLabel}`;
+  const title = `📊 Shopify Comu ${storeConfig.market}｜${period.label}｜${dateLabel}`;
   const headerTemplate = period.label === "周报"
     ? "green"
     : period.label === "月报"
@@ -637,7 +689,7 @@ function buildMessages(storeConfig, period, current, previous) {
   if (!isDaily) {
     elements.push(markdown(`**发货状态**　已发货：${current.fulfilled}　部分发货：${current.partiallyFulfilled}　待发货：${current.unfulfilled}`));
     elements.push(
-      markdown(`**${period.label === "周报" ? "周期" : "月度"}对比**`),
+      markdown(`**${period.label === "月报" ? "月度" : "周度"}对比**`),
       makeTable([
         { name: "item", display_name: "商品", data_type: "text", width: "180px" },
         { name: "current", display_name: "本周期", data_type: "number", width: "80px" },
