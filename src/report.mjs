@@ -405,8 +405,30 @@ function kpiColumn(label, value, change = "") {
     tag: "column",
     width: "weighted",
     weight: 1,
-    elements: [markdown(`**${label}**\n${value}${change ? `（${change}）` : ""}`)],
+    elements: [{ ...markdown(`**${label}**\n${value}${change ? `（${change}）` : ""}`), text_align: "left" }],
   };
+}
+
+function kpiGrid(metrics) {
+  const rows = [];
+  for (let offset = 0; offset < metrics.length; offset += 3) {
+    const columns = metrics.slice(offset, offset + 3);
+    while (columns.length < 3) {
+      columns.push({
+        tag: "column",
+        width: "weighted",
+        weight: 1,
+        elements: [markdown("　")],
+      });
+    }
+    rows.push({
+      tag: "column_set",
+      flex_mode: "none",
+      horizontal_spacing: "large",
+      columns,
+    });
+  }
+  return rows;
 }
 
 function makeCard(title, elements, template = "blue") {
@@ -587,38 +609,20 @@ function buildMessages(storeConfig, period, current, previous) {
   const isDaily = period.label === "日报";
   const dayCount = current.dailySummary.length || 1;
   const averageDailyUnits = Number((current.units / dayCount).toFixed(1));
-  const secondaryColumns = isDaily
-    ? [
-        kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
-        kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
-      ]
-    : [
-        kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
-        kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
-        kpiColumn("日均销量", averageDailyUnits, pct(averageDailyUnits, Number((previous.units / (previous.dailySummary.length || 1)).toFixed(1)))),
-        kpiColumn("预售量", current.presaleUnits, pct(current.presaleUnits, previous.presaleUnits)),
-      ];
-  if (isDaily && current.presaleUnits > 0) {
-    secondaryColumns.push(kpiColumn("预售量", current.presaleUnits, pct(current.presaleUnits, previous.presaleUnits)));
-  }
-  const elements = [
-    {
-      tag: "column_set",
-      flex_mode: "none",
-      horizontal_spacing: "small",
-      columns: [
-        kpiColumn("订单数", current.orderCount, pct(current.orderCount, previous.orderCount)),
-        kpiColumn("商品销量", current.units, pct(current.units, previous.units)),
-        kpiColumn("销售额", fmtMoney(current.sales, current.currency), pct(current.sales, previous.sales)),
-      ],
-    },
-    {
-      tag: "column_set",
-      flex_mode: "none",
-      horizontal_spacing: "small",
-      columns: secondaryColumns,
-    },
+  const metrics = [
+    kpiColumn("订单数", current.orderCount, pct(current.orderCount, previous.orderCount)),
+    kpiColumn("商品销量", current.units, pct(current.units, previous.units)),
+    kpiColumn("销售额", fmtMoney(current.sales, current.currency), pct(current.sales, previous.sales)),
+    kpiColumn("退款金额", fmtMoney(current.refunds, current.currency)),
+    kpiColumn("净销售额", fmtMoney(current.netSales, current.currency)),
   ];
+  if (!isDaily) {
+    metrics.push(kpiColumn("日均销量", averageDailyUnits, pct(averageDailyUnits, Number((previous.units / (previous.dailySummary.length || 1)).toFixed(1)))));
+  }
+  if (isDaily && current.presaleUnits > 0) {
+    metrics.push(kpiColumn("预售量", current.presaleUnits, pct(current.presaleUnits, previous.presaleUnits)));
+  }
+  const elements = kpiGrid(metrics);
 
   if (!isDaily) {
     elements.push(markdown(`**发货状态**　已发货：${current.fulfilled}　部分发货：${current.partiallyFulfilled}　待发货：${current.unfulfilled}`));
