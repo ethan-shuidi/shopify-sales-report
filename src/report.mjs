@@ -383,7 +383,11 @@ function makeTable(columns, rows) {
   }
   return {
     tag: "table",
-    columns,
+    columns: columns.map((column) => ({
+      ...column,
+      horizontal_align: "center",
+      vertical_align: "center",
+    })),
     rows,
     page_size: Math.min(10, Math.max(1, rows.length)),
     row_height: "auto",
