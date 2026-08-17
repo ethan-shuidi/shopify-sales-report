@@ -27,6 +27,7 @@ function readStores() {
     feishuWebhookUrl: process.env.FEISHU_WEBHOOK_URL,
     apiVersion: process.env.SHOPIFY_API_VERSION,
     timezone: process.env.SHOPIFY_TIMEZONE,
+    market: process.env.SHOPIFY_MARKET,
   }, 0)];
 }
 
@@ -35,6 +36,7 @@ function normalizeStore(config, index) {
     .replace(/^https?:\/\//, "")
     .replace(/\/$/, "");
   const name = String(config.name || store || `store-${index + 1}`);
+  const market = String(config.market || config.region || process.env.SHOPIFY_MARKET || "US").trim().toUpperCase() || "US";
   const accessToken = config.accessToken || config.adminApiToken;
   const clientId = config.clientId || config.apiKey;
   const clientSecret = config.clientSecret || config.apiSecret;
@@ -50,6 +52,7 @@ function normalizeStore(config, index) {
   }
   return {
     name,
+    market,
     store,
     accessToken,
     clientId,
@@ -605,7 +608,7 @@ function appendWarrantyDetails(elements, current) {
 
 function buildMessages(storeConfig, period, current, previous) {
   const dateLabel = `${period.start} 至 ${addDays(period.end, -1)}`;
-  const title = `📊 Shopify ${storeConfig.name}｜${period.label}｜${dateLabel}`;
+  const title = `📊 Shopify ${storeConfig.name}（${storeConfig.market}）｜${period.label}｜${dateLabel}`;
   const headerTemplate = period.label === "周报"
     ? "green"
     : period.label === "月报"
@@ -636,7 +639,7 @@ function buildMessages(storeConfig, period, current, previous) {
     elements.push(
       markdown(`**${period.label === "周报" ? "周期" : "月度"}对比**`),
       makeTable([
-        { name: "item", display_name: "商品", data_type: "text", width: "auto" },
+        { name: "item", display_name: "商品", data_type: "text", width: "180px" },
         { name: "current", display_name: "本周期", data_type: "number", width: "80px" },
         { name: "previous", display_name: "上周期", data_type: "number", width: "80px" },
         { name: "delta", display_name: "增长量", data_type: "text", width: "80px" },

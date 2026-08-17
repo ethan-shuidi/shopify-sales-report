@@ -52,6 +52,7 @@ SHOPIFY_TIMEZONE          # 可选，作为每店铺的默认值
 [
   {
     "name": "主店铺",
+    "market": "US",
     "store": "bhuvt5-ds.myshopify.com",
     "clientId": "你的 Client ID",
     "clientSecret": "你的 Client Secret",
@@ -61,6 +62,7 @@ SHOPIFY_TIMEZONE          # 可选，作为每店铺的默认值
   },
   {
     "name": "第二店铺",
+    "market": "JP",
     "store": "second-store.myshopify.com",
     "clientId": "第二个 App Client ID",
     "clientSecret": "第二个 App Client Secret",
