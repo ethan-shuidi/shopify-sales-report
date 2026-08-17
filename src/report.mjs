@@ -280,6 +280,7 @@ function aggregate(orders, start, end, timezone) {
   const sales = included.reduce((sum, o) => sum + money(o.currentTotalPriceSet || o.totalPriceSet), 0);
   const refunds = included.reduce((sum, o) => sum + money(o.totalRefundedSet), 0);
   const skuMap = new Map();
+  const warrantyMap = new Map();
   const dailyMap = new Map();
   for (let day = start; day < end; day = addDays(day, 1)) {
     dailyMap.set(day, { date: day, units: 0, skuMap: new Map() });
@@ -289,7 +290,14 @@ function aggregate(orders, start, end, timezone) {
   for (const order of included) {
     const daily = dailyMap.get(dateKey(new Date(order.createdAt), timezone));
     for (const item of lineItems(order)) {
-      if (isWarrantyItem(item)) continue;
+      if (isWarrantyItem(item)) {
+        const title = String(item.title || "延保服务").trim() || "延保服务";
+        const warranty = warrantyMap.get(title) || { title, quantity: 0, orderIds: new Set() };
+        warranty.quantity += Number(item.quantity || 0);
+        warranty.orderIds.add(order.name || order.id);
+        warrantyMap.set(title, warranty);
+        continue;
+      }
       if (isFinalPaymentItem(item)) {
         if (!String(item.sku || "").trim()) {
           abnormalOrderIds.add(order.name || order.id);
@@ -322,7 +330,11 @@ function aggregate(orders, start, end, timezone) {
     units: row.units,
     skuSummary: [...row.skuMap.values()].sort((a, b) => b.quantity - a.quantity),
   }));
-  return { orderCount: included.length, units, presaleUnits, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), dailySummary, abnormalOrderIds: [...abnormalOrderIds], orderDetails };
+  const warrantySummary = [...warrantyMap.values()]
+    .map((row) => ({ title: row.title, quantity: row.quantity, orderIds: [...row.orderIds] }))
+    .sort((a, b) => b.quantity - a.quantity);
+  const warrantyUnits = warrantySummary.reduce((sum, row) => sum + row.quantity, 0);
+  return { orderCount: included.length, units, presaleUnits, warrantyUnits, warrantySummary, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), dailySummary, abnormalOrderIds: [...abnormalOrderIds], orderDetails };
 }
 
 function missingSkuDiagnostics(orders, start, end, timezone) {
@@ -448,6 +460,13 @@ function periodComparisonRows(current, previous) {
       delta: signedNumber(current.presaleUnits - previous.presaleUnits),
       growth: pct(current.presaleUnits, previous.presaleUnits),
     },
+    {
+      item: "延保服务",
+      current: current.warrantyUnits,
+      previous: previous.warrantyUnits,
+      delta: signedNumber(current.warrantyUnits - previous.warrantyUnits),
+      growth: pct(current.warrantyUnits, previous.warrantyUnits),
+    },
     ...keys.map((key) => {
       const currentRow = currentMap.get(key);
       const previousRow = previousMap.get(key);
@@ -471,7 +490,7 @@ function dailySalesTable(current) {
     { name: "total", display_name: "合计", data_type: "number", width: "80px" },
     ...skuRows.map((row, index) => ({
       name: `sku_${index}`,
-      display_name: skuLabel(row),
+      display_name: `${skuFamily(row.sku)}${row.color}`,
       data_type: "number",
       width: "120px",
     })),
@@ -537,6 +556,24 @@ function skuMatrixTable(current) {
   return makeTable(columns, rows);
 }
 
+function warrantyTable(current) {
+  return makeTable([
+    { name: "service", display_name: "延保服务", data_type: "text", width: "auto" },
+    { name: "quantity", display_name: "数量", data_type: "number", width: "80px" },
+    { name: "orders", display_name: "订单号", data_type: "text", width: "auto" },
+  ], current.warrantySummary.map((row) => ({
+    service: row.title,
+    quantity: row.quantity,
+    orders: row.orderIds.join("、"),
+  })));
+}
+
+function appendWarrantyDetails(elements, current) {
+  if (current.warrantyUnits > 0) {
+    elements.push(markdown(`**延保服务明细**　共 ${current.warrantyUnits} 份`), warrantyTable(current));
+  }
+}
+
 function buildMessages(storeConfig, period, current, previous) {
   const dateLabel = `${period.start} 至 ${addDays(period.end, -1)}`;
   const title = `📊 Shopify ${storeConfig.name}｜${period.label}｜${dateLabel}`;
@@ -597,6 +634,7 @@ function buildMessages(storeConfig, period, current, previous) {
       markdown("**日销量明细**"),
       dailySalesTable(current),
     );
+    appendWarrantyDetails(elements, current);
     if (current.abnormalOrderIds.length > 0) {
       elements.push(markdown(`<font color='red'>**异常订单（尾款缺少 SKU）**</font>\n${current.abnormalOrderIds.join("、")}`));
     }
@@ -611,6 +649,8 @@ function buildMessages(storeConfig, period, current, previous) {
   } else {
     elements.push(markdown("本周期没有商品销量。"));
   }
+
+  appendWarrantyDetails(elements, current);
 
   if (current.abnormalOrderIds.length > 0) {
     elements.push(markdown(`<font color='red'>**异常订单（尾款缺少 SKU）**</font>\n${current.abnormalOrderIds.join("、")}`));
