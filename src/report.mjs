@@ -292,10 +292,12 @@ function aggregate(orders, start, end, timezone) {
     for (const item of lineItems(order)) {
       if (isWarrantyItem(item)) {
         const title = String(item.title || "延保服务").trim() || "延保服务";
-        const warranty = warrantyMap.get(title) || { title, quantity: 0, orderIds: new Set() };
+        const orderId = order.name || order.id;
+        const warrantyDate = dateKey(new Date(order.createdAt), timezone);
+        const warrantyKey = `${warrantyDate}\u0000${orderId}\u0000${title}`;
+        const warranty = warrantyMap.get(warrantyKey) || { date: warrantyDate, title, quantity: 0, orderId };
         warranty.quantity += Number(item.quantity || 0);
-        warranty.orderIds.add(order.name || order.id);
-        warrantyMap.set(title, warranty);
+        warrantyMap.set(warrantyKey, warranty);
         continue;
       }
       if (isFinalPaymentItem(item)) {
@@ -331,8 +333,7 @@ function aggregate(orders, start, end, timezone) {
     skuSummary: [...row.skuMap.values()].sort((a, b) => b.quantity - a.quantity),
   }));
   const warrantySummary = [...warrantyMap.values()]
-    .map((row) => ({ title: row.title, quantity: row.quantity, orderIds: [...row.orderIds] }))
-    .sort((a, b) => b.quantity - a.quantity);
+    .sort((a, b) => a.date.localeCompare(b.date) || a.orderId.localeCompare(b.orderId));
   const warrantyUnits = warrantySummary.reduce((sum, row) => sum + row.quantity, 0);
   return { orderCount: included.length, units, presaleUnits, warrantyUnits, warrantySummary, sales, refunds, netSales: sales - refunds, fulfilled, partiallyFulfilled, unfulfilled, currency, skuSummary: [...skuMap.values()].sort((a, b) => b.quantity - a.quantity), dailySummary, abnormalOrderIds: [...abnormalOrderIds], orderDetails };
 }
@@ -580,13 +581,15 @@ function skuMatrixTable(current) {
 
 function warrantyTable(current) {
   return makeTable([
+    { name: "date", display_name: "日期", data_type: "text", width: "110px" },
     { name: "service", display_name: "延保服务", data_type: "text", width: "auto" },
     { name: "quantity", display_name: "数量", data_type: "number", width: "80px" },
     { name: "orders", display_name: "订单号", data_type: "text", width: "auto" },
   ], current.warrantySummary.map((row) => ({
+    date: row.date.replaceAll("-", "/"),
     service: row.title,
     quantity: row.quantity,
-    orders: row.orderIds.join("、"),
+    orders: row.orderId,
   })));
 }
 
