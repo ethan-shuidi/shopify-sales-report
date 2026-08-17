@@ -25,3 +25,11 @@ jobs:
           REPORT_TYPE: daily
           DIAGNOSE_MISSING_SKU: ${{ inputs.diagnose_missing_sku }}
         run: node src/report.mjs
+      - name: Run rolling 7-day report
+        if: ${{ !inputs.diagnose_missing_sku }}
+        env:
+          SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
+          SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
+          SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
+          REPORT_TYPE: rolling7
+        run: node src/report.mjs

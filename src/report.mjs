@@ -103,6 +103,7 @@ function addDays(key, amount) {
 function periodFor(type, timezone, now = new Date()) {
   const today = dateKey(now, timezone);
   if (type === "daily") return { label: "日报", start: addDays(today, -1), end: today };
+  if (type === "rolling7") return { label: "近7日滚动报告", start: addDays(today, -7), end: today };
   if (type === "weekly") {
     const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
     const thisMonday = addDays(today, -(weekday === 0 ? 6 : weekday - 1));
@@ -113,7 +114,7 @@ function periodFor(type, timezone, now = new Date()) {
     const previousFirst = addDays(first, -1).slice(0, 7) + "-01";
     return { label: "月报", start: previousFirst, end: first };
   }
-  throw new Error(`REPORT_TYPE must be daily, weekly, or monthly; got ${type}`);
+  throw new Error(`REPORT_TYPE must be daily, rolling7, weekly, or monthly; got ${type}`);
 }
 
 function previousPeriod(period) {
@@ -489,7 +490,13 @@ function dailySalesTable(current) {
 function buildMessages(storeConfig, period, current, previous) {
   const dateLabel = `${period.start} 至 ${addDays(period.end, -1)}`;
   const title = `📊 Shopify ${storeConfig.name}｜${period.label}｜${dateLabel}`;
-  const headerTemplate = period.label === "周报" ? "green" : period.label === "月报" ? "purple" : "blue";
+  const headerTemplate = period.label === "周报"
+    ? "green"
+    : period.label === "月报"
+      ? "purple"
+      : period.label === "近7日滚动报告"
+        ? "orange"
+        : "blue";
   const skuRows = current.skuSummary.map((row) => ({
     sku: row.sku,
     color: row.color,

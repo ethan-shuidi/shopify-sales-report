@@ -13,7 +13,9 @@ npm run check
 REPORT_TYPE=daily npm run report
 ```
 
-`REPORT_TYPE` 可选：`daily`、`weekly`、`monthly`。
+`REPORT_TYPE` 可选：`daily`、`rolling7`、`weekly`、`monthly`。
+
+每日 workflow 会先发送昨天的日报，再发送最近 7 个完整自然日的滚动报告。滚动报告会对比前一个连续 7 日周期，不包含订单明细。
 
 ## GitHub Actions 配置
 
