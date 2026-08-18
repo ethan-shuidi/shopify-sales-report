@@ -481,7 +481,26 @@ function signedNumber(value) {
   return `${value > 0 ? "+" : ""}${value}`;
 }
 
-function periodComparisonRows(current, previous, groupByFamilyColor = false) {
+function ancillaryComparisonRows(current, previous) {
+  return [
+    {
+      item: "预售量",
+      current: current.presaleUnits,
+      previous: previous.presaleUnits,
+      delta: signedNumber(current.presaleUnits - previous.presaleUnits),
+      growth: pct(current.presaleUnits, previous.presaleUnits),
+    },
+    {
+      item: "延保服务",
+      current: current.warrantyUnits,
+      previous: previous.warrantyUnits,
+      delta: signedNumber(current.warrantyUnits - previous.warrantyUnits),
+      growth: pct(current.warrantyUnits, previous.warrantyUnits),
+    },
+  ];
+}
+
+function periodComparisonRows(current, previous, groupByFamilyColor = false, includeAncillary = true) {
   const currentMap = new Map(current.skuSummary.map((row) => [skuKey(row), row]));
   const previousMap = new Map(previous.skuSummary.map((row) => [skuKey(row), row]));
   let productRows;
@@ -526,20 +545,7 @@ function periodComparisonRows(current, previous, groupByFamilyColor = false) {
       delta: signedNumber(current.units - previous.units),
       growth: pct(current.units, previous.units),
     },
-    {
-      item: "预售量",
-      current: current.presaleUnits,
-      previous: previous.presaleUnits,
-      delta: signedNumber(current.presaleUnits - previous.presaleUnits),
-      growth: pct(current.presaleUnits, previous.presaleUnits),
-    },
-    {
-      item: "延保服务",
-      current: current.warrantyUnits,
-      previous: previous.warrantyUnits,
-      delta: signedNumber(current.warrantyUnits - previous.warrantyUnits),
-      growth: pct(current.warrantyUnits, previous.warrantyUnits),
-    },
+    ...(includeAncillary ? ancillaryComparisonRows(current, previous) : []),
     ...productRows,
   ];
 }
@@ -710,19 +716,29 @@ function buildMessages(storeConfig, period, current, previous) {
   const elements = kpiGrid(metrics);
 
   if (!isDaily) {
+    const isRolling7 = period.label === "近7日滚动报告";
+    const comparisonColumns = [
+      { name: "item", display_name: "商品", data_type: "text", width: "180px" },
+      { name: "current", display_name: "本周期", data_type: "number", width: "80px" },
+      { name: "previous", display_name: "上周期", data_type: "number", width: "80px" },
+      { name: "delta", display_name: "增长量", data_type: "text", width: "80px" },
+      { name: "growth", display_name: "增长率", data_type: "text", width: "80px" },
+    ];
     elements.push(markdown(`**发货状态**　已发货：${current.fulfilled}　部分发货：${current.partiallyFulfilled}　待发货：${current.unfulfilled}`));
     elements.push(
       markdown(`**${period.label === "月报" ? "月度" : "周度"}对比**`),
-      makeTable([
-        { name: "item", display_name: "商品", data_type: "text", width: "180px" },
-        { name: "current", display_name: "本周期", data_type: "number", width: "80px" },
-        { name: "previous", display_name: "上周期", data_type: "number", width: "80px" },
-        { name: "delta", display_name: "增长量", data_type: "text", width: "80px" },
-        { name: "growth", display_name: "增长率", data_type: "text", width: "80px" },
-      ], periodComparisonRows(current, previous, period.label === "近7日滚动报告")),
-      markdown("**日销量明细**"),
-      dailySalesTable(current),
+      makeTable(comparisonColumns, periodComparisonRows(current, previous, isRolling7, !isRolling7)),
     );
+    if (isRolling7) {
+      elements.push(
+        markdown("**其他**"),
+        makeTable([
+          { ...comparisonColumns[0], display_name: "项目" },
+          ...comparisonColumns.slice(1),
+        ], ancillaryComparisonRows(current, previous)),
+      );
+    }
+    elements.push(markdown("**日销量明细**"), dailySalesTable(current));
     appendWarrantyDetails(elements, current);
     if (current.abnormalOrderIds.length > 0) {
       elements.push(markdown(`<font color='red'>**异常订单（尾款缺少 SKU）**</font>\n${current.abnormalOrderIds.join("、")}`));
