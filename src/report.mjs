@@ -155,6 +155,9 @@ function isWarrantyItem(item) {
 function warrantyServiceLabel(item) {
   const title = String(item?.title || "延保服务").trim() || "延保服务";
   const variantTitle = String(item?.variantTitle || "").trim();
+  const warrantyText = `${variantTitle} ${item?.name || ""} ${title}`.toLowerCase();
+  if (/\b1[\s-]*year\b|1\s*年/.test(warrantyText)) return "一年延保";
+  if (/\b2[\s-]*year\b|2\s*年/.test(warrantyText)) return "两年延保";
   if (!variantTitle || variantTitle.toLowerCase() === "default title") return String(item?.name || title).trim() || title;
   if (title.toLowerCase().includes(variantTitle.toLowerCase())) return title;
   return `${title}（${variantTitle}）`;
@@ -478,11 +481,43 @@ function signedNumber(value) {
   return `${value > 0 ? "+" : ""}${value}`;
 }
 
-function periodComparisonRows(current, previous) {
+function periodComparisonRows(current, previous, groupByFamilyColor = false) {
   const currentMap = new Map(current.skuSummary.map((row) => [skuKey(row), row]));
   const previousMap = new Map(previous.skuSummary.map((row) => [skuKey(row), row]));
-  const keys = [...new Set([...currentMap.keys(), ...previousMap.keys()])]
-    .sort((a, b) => (currentMap.get(b)?.quantity || 0) - (currentMap.get(a)?.quantity || 0));
+  let productRows;
+  if (groupByFamilyColor) {
+    const currentFamilyColors = aggregateFamilyColors(current.skuSummary);
+    const previousFamilyColors = aggregateFamilyColors(previous.skuSummary);
+    productRows = familyColorDimensions([...current.skuSummary, ...previous.skuSummary])
+      .filter((dimension) => (currentFamilyColors.get(dimension.key) || 0) > 0 || (previousFamilyColors.get(dimension.key) || 0) > 0)
+      .map((dimension) => {
+        const currentQuantity = currentFamilyColors.get(dimension.key) || 0;
+        const previousQuantity = previousFamilyColors.get(dimension.key) || 0;
+        return {
+          item: `${dimension.family}${dimension.color}`,
+          current: currentQuantity,
+          previous: previousQuantity,
+          delta: signedNumber(currentQuantity - previousQuantity),
+          growth: pct(currentQuantity, previousQuantity),
+        };
+      });
+  } else {
+    const keys = [...new Set([...currentMap.keys(), ...previousMap.keys()])]
+      .sort((a, b) => (currentMap.get(b)?.quantity || 0) - (currentMap.get(a)?.quantity || 0));
+    productRows = keys.map((key) => {
+      const currentRow = currentMap.get(key);
+      const previousRow = previousMap.get(key);
+      const currentQuantity = currentRow?.quantity || 0;
+      const previousQuantity = previousRow?.quantity || 0;
+      return {
+        item: skuLabel(currentRow || previousRow),
+        current: currentQuantity,
+        previous: previousQuantity,
+        delta: signedNumber(currentQuantity - previousQuantity),
+        growth: pct(currentQuantity, previousQuantity),
+      };
+    });
+  }
   return [
     {
       item: "全部商品",
@@ -505,19 +540,7 @@ function periodComparisonRows(current, previous) {
       delta: signedNumber(current.warrantyUnits - previous.warrantyUnits),
       growth: pct(current.warrantyUnits, previous.warrantyUnits),
     },
-    ...keys.map((key) => {
-      const currentRow = currentMap.get(key);
-      const previousRow = previousMap.get(key);
-      const currentQuantity = currentRow?.quantity || 0;
-      const previousQuantity = previousRow?.quantity || 0;
-      return {
-        item: skuLabel(currentRow || previousRow),
-        current: currentQuantity,
-        previous: previousQuantity,
-        delta: signedNumber(currentQuantity - previousQuantity),
-        growth: pct(currentQuantity, previousQuantity),
-      };
-    }),
+    ...productRows,
   ];
 }
 
@@ -696,7 +719,7 @@ function buildMessages(storeConfig, period, current, previous) {
         { name: "previous", display_name: "上周期", data_type: "number", width: "80px" },
         { name: "delta", display_name: "增长量", data_type: "text", width: "80px" },
         { name: "growth", display_name: "增长率", data_type: "text", width: "80px" },
-      ], periodComparisonRows(current, previous)),
+      ], periodComparisonRows(current, previous, period.label === "近7日滚动报告")),
       markdown("**日销量明细**"),
       dailySalesTable(current),
     );
