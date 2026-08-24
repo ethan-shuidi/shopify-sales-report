@@ -1,5 +1,6 @@
 const reportType = (process.env.REPORT_TYPE || "daily").toLowerCase();
 const diagnoseMissingSku = String(process.env.DIAGNOSE_MISSING_SKU || "false").toLowerCase() === "true";
+const marketFilter = String(process.env.MARKET_FILTER || "").trim().toUpperCase();
 
 function readStores() {
   if (process.env.SHOPIFY_STORES_JSON) {
@@ -12,7 +13,10 @@ function readStores() {
     if (!Array.isArray(stores) || stores.length === 0) {
       throw new Error("SHOPIFY_STORES_JSON must be a non-empty JSON array");
     }
-    return stores.map((config, index) => normalizeStore(config, index));
+    const normalized = stores.map((config, index) => normalizeStore(config, index));
+    const filtered = marketFilter ? normalized.filter((store) => store.market === marketFilter) : normalized;
+    if (filtered.length === 0) throw new Error(`No stores matched MARKET_FILTER="${marketFilter}"`);
+    return filtered;
   }
 
   // Temporary backwards compatibility for the original one-store setup.
@@ -136,7 +140,7 @@ function lineItems(order) {
 const singleValueSkus = new Set(["TN10P051", "TN10P052", "TN10P053", "TN10P011", "TN10P012", "TN10P013", "X0051AFG1N"]);
 const allowedSuffixValues = new Set([2, 3, 5, 10, 50, 100, 300]);
 const finalPaymentTitleKeywords = ["final payment", "balance payment", "remaining payment", "balance due"];
-const warrantyTitleKeywords = ["warranty", "extended warranty", "comucare"];
+const warrantyTitleKeywords = ["warranty", "extended warranty", "comucare", "延長保証", "保証"];
 const presaleTitleKeywords = ["presale", "pre-sale", "voucher", "privilege voucher"];
 
 function titleMatches(title, keywords) {
@@ -183,9 +187,18 @@ function variantColor(variant) {
   const options = variant?.selectedOptions || [];
   const colorOption = options.find((option) => {
     const name = String(option?.name || "").trim().toLowerCase();
-    return name === "color" || name === "colour" || name === "颜色" || name.includes("color") || name.includes("colour");
+    return name === "color" || name === "colour" || name === "颜色" || name === "色" || name.includes("color") || name.includes("colour");
   });
-  return String(colorOption?.value || "").trim();
+  const value = String(colorOption?.value || "").trim();
+  const normalized = value.toLowerCase();
+  const colors = {
+    "black": "黑色", "ブラック": "黑色",
+    "silver": "银色", "シルバー": "银色",
+    "cherry red": "樱桃红", "チェリーレッド": "樱桃红",
+    "orange": "橙色", "オレンジ": "橙色",
+    "white": "白色", "ホワイト": "白色",
+  };
+  return colors[normalized] || value;
 }
 
 function skuColor(rawSku, title = "", variant = null) {
@@ -194,9 +207,9 @@ function skuColor(rawSku, title = "", variant = null) {
   if (!titleMatches(title, finalPaymentTitleKeywords) && titleMatches(title, presaleTitleKeywords)) return "预售";
   const shopifyColor = variantColor(variant);
   if (shopifyColor) return shopifyColor;
-  if (sku === "X0051AFG1N" || sku === "TN10P011" || sku === "TN10P051" || sku === "TN20P011" || sku.startsWith("TN10P011-")) return "黑色";
-  if (sku === "TN10P012" || sku === "TN10P052" || sku === "TN20P012" || sku.startsWith("TN10P012-")) return "银色";
-  if (sku === "TN10P013" || sku === "TN10P053" || sku === "TN20P014" || sku.startsWith("TN10P013-")) return sku === "TN20P014" ? "樱桃红" : "橙色";
+  if (["X0051AFG1N", "TN10P011", "TN10P031", "TN10P051", "TN20P011", "TN20P031"].includes(sku) || sku.startsWith("TN10P011-")) return "黑色";
+  if (["TN10P012", "TN10P032", "TN10P052", "TN20P012"].includes(sku) || sku.startsWith("TN10P012-")) return "银色";
+  if (["TN10P013", "TN10P033", "TN10P053", "TN20P014", "TN20P034"].includes(sku) || sku.startsWith("TN10P013-")) return sku === "TN20P014" || sku === "TN20P034" ? "樱桃红" : "橙色";
   return "未分类";
 }
 

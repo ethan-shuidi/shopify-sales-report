@@ -1,4 +1,4 @@
-name: Shopify monthly report
+name: Shopify JP weekly report
 
 on:
   workflow_dispatch:
@@ -11,11 +11,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Run monthly report
+      - name: Run JP weekly report
         env:
           SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
           SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
           SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
-          MARKET_FILTER: US
-          REPORT_TYPE: monthly
+          MARKET_FILTER: JP
+          REPORT_TYPE: weekly
         run: node src/report.mjs

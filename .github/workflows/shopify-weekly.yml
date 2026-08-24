@@ -16,5 +16,6 @@ jobs:
           SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
           SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
           SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
+          MARKET_FILTER: US
           REPORT_TYPE: weekly
         run: node src/report.mjs

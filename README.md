@@ -29,6 +29,13 @@ SHOPIFY_TIMEZONE          # 可选，作为每店铺的默认值
 
 工作流已拆分为日报、周报、月报三个独立任务，分别在每天 09:17、每周一 09:17 和每月 1 日 09:17（北京时间）运行，避免整点高峰造成调度延迟。
 
+US 与 JP 报告使用独立 workflow：
+
+- US：`shopify-daily.yml`、`shopify-weekly.yml`、`shopify-monthly.yml`
+- JP：`shopify-daily-jp.yml`、`shopify-weekly-jp.yml`、`shopify-monthly-jp.yml`
+
+通过 `MARKET_FILTER` 选择店铺市场；同一份 `SHOPIFY_STORES_JSON` 可以包含多个店铺，但每个 workflow 只播报对应市场。cron-job.org 需要分别调用 US 和 JP 的 workflow，并在各自需要的本地时间触发。
+
 ## 权限
 
 当前报表只需要 `read_orders`。读取较早历史订单可能需要 Shopify 批准 `read_all_orders`。如未来需要查询独立商品目录、产品供应商或商品标签等信息，再增加 `read_products`。
@@ -43,6 +50,7 @@ SHOPIFY_TIMEZONE          # 可选，作为每店铺的默认值
 - 发货状态按订单的 `displayFulfillmentStatus` 汇总。
 - 播报会附带 `SKU | 颜色 | 销量` 汇总，以及 `订单号 | 风险等级 | 发货状态 | 销量` 明细；订单较多时会自动拆成多条飞书消息。
 - SKU 销量沿用业务换算：`TN10P011/012/013-2/3/5/10/50/100/300` 按后缀换算台数；黑/银/橙和预售按 SKU/标题规则归类，其余 SKU 标记为“未分类”。
+- 日本站 SKU 映射：`TN20P031` 黑色、`TN20P032` 银色、`TN20P034` 樱桃红、`TN10P031` 黑色；日本变体标题 `ブラック/シルバー/チェリーレッド` 也会转换为中文颜色。
 
 ## 多店铺配置示例
 

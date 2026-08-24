@@ -1,4 +1,4 @@
-name: Shopify daily report
+name: Shopify JP daily report
 
 on:
   workflow_dispatch:
@@ -17,21 +17,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Run daily report
+      - name: Run JP daily report
         env:
           SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
           SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
           SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
-          MARKET_FILTER: US
+          MARKET_FILTER: JP
           REPORT_TYPE: daily
           DIAGNOSE_MISSING_SKU: ${{ inputs.diagnose_missing_sku }}
         run: node src/report.mjs
-      - name: Run rolling 7-day report
+      - name: Run JP rolling 7-day report
         if: ${{ !inputs.diagnose_missing_sku }}
         env:
           SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
           SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
           SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
-          MARKET_FILTER: US
+          MARKET_FILTER: JP
           REPORT_TYPE: rolling7
         run: node src/report.mjs
