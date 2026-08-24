@@ -79,6 +79,7 @@ query Orders($first: Int!, $after: String, $search: String!) {
       totalRefundedSet { shopMoney { amount currencyCode } }
       lineItems(first: 250) { edges { node {
         id title name variantTitle sku quantity
+        variant { selectedOptions { name value } }
       } } }
       fulfillments(first: 100) {
         id status createdAt updatedAt deliveredAt inTransitAt
@@ -183,29 +184,38 @@ function skuUnitValue(rawSku) {
   return Number(match[2]);
 }
 
-function variantColor(variant) {
+function normalizedColorValue(value) {
+  const raw = String(value || "").trim();
+  const normalized = raw.toLowerCase();
+  const colors = {
+    "black": "黑色", "ブラック": "黑色", "黒": "黑色",
+    "silver": "银色", "シルバー": "银色", "銀": "银色",
+    "cherry red": "樱桃红", "チェリーレッド": "樱桃红", "樱桃红": "樱桃红", "樱桃紅": "樱桃红",
+    "orange": "橙色", "オレンジ": "橙色", "橙": "橙色",
+    "white": "白色", "ホワイト": "白色", "白": "白色",
+  };
+  return colors[normalized] || "";
+}
+
+function variantColor(variant, variantTitle = "") {
   const options = variant?.selectedOptions || [];
   const colorOption = options.find((option) => {
     const name = String(option?.name || "").trim().toLowerCase();
-    return name === "color" || name === "colour" || name === "颜色" || name === "色" || name.includes("color") || name.includes("colour");
+    return name === "color" || name === "colour" || name === "颜色" || name === "色" || name === "カラー" || name.includes("color") || name.includes("colour");
   });
-  const value = String(colorOption?.value || "").trim();
-  const normalized = value.toLowerCase();
-  const colors = {
-    "black": "黑色", "ブラック": "黑色",
-    "silver": "银色", "シルバー": "银色",
-    "cherry red": "樱桃红", "チェリーレッド": "樱桃红",
-    "orange": "橙色", "オレンジ": "橙色",
-    "white": "白色", "ホワイト": "白色",
-  };
-  return colors[normalized] || value;
+  if (colorOption?.value) return normalizedColorValue(colorOption.value) || String(colorOption.value).trim();
+  for (const part of String(variantTitle || "").split(/\s*[/|｜]\s*/)) {
+    const color = normalizedColorValue(part);
+    if (color) return color;
+  }
+  return "";
 }
 
-function skuColor(rawSku, title = "", variant = null) {
+function skuColor(rawSku, title = "", variant = null, variantTitle = "") {
   const sku = normalizedSku(rawSku);
   if (titleMatches(title, warrantyTitleKeywords)) return "延保服务";
   if (!titleMatches(title, finalPaymentTitleKeywords) && titleMatches(title, presaleTitleKeywords)) return "预售";
-  const shopifyColor = variantColor(variant);
+  const shopifyColor = variantColor(variant, variantTitle);
   if (shopifyColor) return shopifyColor;
   if (["X0051AFG1N", "TN10P011", "TN10P031", "TN10P051", "TN20P011", "TN20P031"].includes(sku) || sku.startsWith("TN10P011-")) return "黑色";
   if (["TN10P012", "TN10P032", "TN10P052", "TN20P012"].includes(sku) || sku.startsWith("TN10P012-")) return "银色";
@@ -337,7 +347,7 @@ function aggregate(orders, start, end, timezone) {
         continue;
       }
       const sku = normalizedSku(item.sku);
-      const color = skuColor(item.sku, item.title, item.variant);
+      const color = skuColor(item.sku, item.title, item.variant, item.variantTitle);
       const quantity = Number(item.quantity || 0) * skuUnitValue(item.sku);
       const key = `${sku}\u0000${color}`;
       const row = skuMap.get(key) || { sku, color, quantity: 0 };
@@ -372,7 +382,7 @@ function missingSkuDiagnostics(orders, start, end, timezone) {
     for (const item of lineItems(order)) {
       if (isWarrantyItem(item)) continue;
       const rawSku = String(item.sku || "").trim();
-      const color = skuColor(item.sku, item.title, item.variant);
+      const color = skuColor(item.sku, item.title, item.variant, item.variantTitle);
       const reasons = [];
       if (!rawSku) reasons.push("无 SKU");
       if (color === "未分类") reasons.push("颜色未分类");
