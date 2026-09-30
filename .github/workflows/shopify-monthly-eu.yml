@@ -1,0 +1,21 @@
+name: Shopify EU monthly report
+
+on:
+  workflow_dispatch:
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run EU monthly report
+        env:
+          SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
+          SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
+          SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
+          MARKET_FILTER: EU
+          REPORT_TYPE: monthly
+        run: node src/report.mjs

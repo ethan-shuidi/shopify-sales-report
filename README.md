@@ -27,14 +27,15 @@ SHOPIFY_API_VERSION       # 可选，作为每店铺的默认值
 SHOPIFY_TIMEZONE          # 可选，作为每店铺的默认值
 ```
 
-工作流已拆分为日报、周报、月报三个独立任务，分别在每天 09:17、每周一 09:17 和每月 1 日 09:17（北京时间）运行，避免整点高峰造成调度延迟。
+工作流按日报、周报、月报拆分；当前日报任务会连续发送日报和近 7 日滚动报告，周报可按需要停用，月报单独触发。
 
-US 与 JP 报告使用独立 workflow：
+US、JP 与 EU 报告使用独立 workflow：
 
 - US：`shopify-daily.yml`、`shopify-weekly.yml`、`shopify-monthly.yml`
 - JP：`shopify-daily-jp.yml`、`shopify-weekly-jp.yml`、`shopify-monthly-jp.yml`
+- EU：`shopify-daily-eu.yml`、`shopify-monthly-eu.yml`
 
-通过 `MARKET_FILTER` 选择店铺市场；同一份 `SHOPIFY_STORES_JSON` 可以包含多个店铺，但每个 workflow 只播报对应市场。cron-job.org 需要分别调用 US 和 JP 的 workflow，并在各自需要的本地时间触发。
+通过 `MARKET_FILTER` 选择店铺市场；同一份 `SHOPIFY_STORES_JSON` 可以包含多个店铺，但每个 workflow 只播报对应市场。日报 workflow 会发送日报和近 7 日滚动报告。cron-job.org 需要分别调用各市场的日报和月报 workflow，并按各店铺需要的本地时间触发。
 
 ## 权限
 
@@ -71,13 +72,23 @@ US 与 JP 报告使用独立 workflow：
     "apiVersion": "2026-07"
   },
   {
-    "name": "第二店铺",
+    "name": "Comu JP",
     "market": "JP",
     "store": "second-store.myshopify.com",
     "clientId": "第二个 App Client ID",
     "clientSecret": "第二个 App Client Secret",
     "feishuWebhookUrl": "https://open.feishu.cn/open-apis/bot/v2/hook/yyy",
     "timezone": "Asia/Shanghai",
+    "apiVersion": "2026-07"
+  },
+  {
+    "name": "Comu EU",
+    "market": "EU",
+    "store": "eu-store.myshopify.com",
+    "clientId": "EU App Client ID",
+    "clientSecret": "EU App Client Secret",
+    "feishuWebhookUrl": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+    "timezone": "Europe/Berlin",
     "apiVersion": "2026-07"
   }
 ]

@@ -1,0 +1,37 @@
+name: Shopify EU daily report
+
+on:
+  workflow_dispatch:
+    inputs:
+      diagnose_missing_sku:
+        description: Only print orders with missing or unclassified SKU
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run EU daily report
+        env:
+          SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
+          SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
+          SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
+          MARKET_FILTER: EU
+          REPORT_TYPE: daily
+          DIAGNOSE_MISSING_SKU: ${{ inputs.diagnose_missing_sku }}
+        run: node src/report.mjs
+      - name: Run EU rolling 7-day report
+        if: ${{ !inputs.diagnose_missing_sku }}
+        env:
+          SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
+          SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
+          SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
+          MARKET_FILTER: EU
+          REPORT_TYPE: rolling7
+        run: node src/report.mjs
