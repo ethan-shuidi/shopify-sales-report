@@ -1,0 +1,62 @@
+name: Shopify v2 daily report
+
+# v2 = 销售 + Sessions + 转化率 + 渠道归因（对应飞书文档《Shopify 飞书销售日播报 Bot》）
+# 与 v1 的 shopify-daily*.yml 完全独立，互不影响。
+
+on:
+  workflow_dispatch:
+    inputs:
+      market:
+        description: Which market to report
+        required: true
+        type: choice
+        default: US
+        options:
+          - US
+          - JP
+          - EU
+      report_day:
+        description: Report day (today = 今日口径, yesterday = 昨日口径)
+        required: false
+        type: choice
+        default: today
+        options:
+          - today
+          - yesterday
+      dry_run:
+        description: Only print the card JSON, do not send to Feishu
+        required: false
+        type: boolean
+        default: false
+      write_snapshot:
+        description: Save the daily snapshot as an artifact
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run v2 daily report
+        env:
+          SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
+          SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
+          SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
+          MARKET_FILTER: ${{ inputs.market }}
+          REPORT_DAY: ${{ inputs.report_day }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          WRITE_SNAPSHOT: ${{ inputs.write_snapshot }}
+        run: node src/v2/report.mjs
+      - name: Upload snapshot
+        if: ${{ inputs.write_snapshot && !inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-snapshot-${{ inputs.market }}-${{ github.run_id }}
+          path: snapshots/
+          if-no-files-found: ignore
+          retention-days: 90

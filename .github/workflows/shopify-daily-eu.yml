@@ -17,7 +17,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Run EU daily report
+      - name: Run EU daily report (v1)
+        if: ${{ vars.REPORT_VERSION != 'v2' }}
         env:
           SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
           SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
@@ -26,8 +27,8 @@ jobs:
           REPORT_TYPE: daily
           DIAGNOSE_MISSING_SKU: ${{ inputs.diagnose_missing_sku }}
         run: node src/report.mjs
-      - name: Run EU rolling 7-day report
-        if: ${{ !inputs.diagnose_missing_sku }}
+      - name: Run EU rolling 7-day report (v1)
+        if: ${{ !inputs.diagnose_missing_sku && vars.REPORT_VERSION != 'v2' }}
         env:
           SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
           SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
@@ -35,3 +36,24 @@ jobs:
           MARKET_FILTER: EU
           REPORT_TYPE: rolling7
         run: node src/report.mjs
+
+      - name: Run daily report (v2)
+        if: ${{ vars.REPORT_VERSION == 'v2' }}
+        env:
+          SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
+          SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
+          SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
+          MARKET_FILTER: EU
+          REPORT_DAY: ${{ vars.REPORT_DAY || 'yesterday' }}
+          WRITE_SNAPSHOT: 'true'
+        run: node src/v2/report.mjs
+
+      - name: Upload v2 snapshot
+        if: ${{ vars.REPORT_VERSION == 'v2' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-snapshot-${{ github.run_id }}
+          path: snapshots/
+          if-no-files-found: ignore
+          retention-days: 30
+
