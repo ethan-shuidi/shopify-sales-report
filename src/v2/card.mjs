@@ -226,6 +226,28 @@ function buildElements(model, { collapsible }) {
   });
 
   // 区块 3：渠道效率（文档五分组：广告 / 红人 / 联盟 / 其他已识别 / 待确认）
+  // 区块 4b：经营效率（来自飞书多维表格，标注数据日期）
+  elements.push(md("**经营效率**"));
+  if (model.efficiency) {
+    elements.push({
+      tag: "column_set",
+      flex_mode: "none",
+      horizontal_spacing: "large",
+      columns: [
+        panel({
+          weight: 1,
+          elements: [
+            md(`<font color='blue'>**${model.efficiency.label}**</font>`),
+            md(`**<font color='blue'>${model.efficiency.value.toFixed(2)}</font>**`, { text_size: "heading" }),
+            md(`<font color='${COLOR_MUTED}'>数据日期 ${model.efficiency.date}</font>`),
+          ],
+        }),
+      ],
+    });
+  } else {
+    elements.push(md(`<font color='${COLOR_MUTED}'>底表数据暂不可用</font>`));
+  }
+
   elements.push(md("**渠道效率**　广告 / 红人 / 联盟 / 自然搜索 / 直接访问 / AI 搜索导流 / 其他渠道 / 待确定"));
   if (channels.groups.length > 0) {
     elements.push(channelTable(channels.groups, currency));
@@ -276,28 +298,6 @@ function buildElements(model, { collapsible }) {
       smallKpi("净销售额", fmtMoney(month.netSales, currency), `<font color='${COLOR_MUTED}'>${model.dateLabel.slice(0, 7)} 累计</font>`),
     ],
   });
-
-  // 区块 4b：经营效率（来自飞书多维表格，标注数据日期）
-  elements.push(md("**经营效率**"));
-  if (model.efficiency) {
-    elements.push({
-      tag: "column_set",
-      flex_mode: "none",
-      horizontal_spacing: "large",
-      columns: [
-        panel({
-          weight: 1,
-          elements: [
-            md(`<font color='${COLOR_MUTED}'>${model.efficiency.label}</font>`),
-            md(`**${model.efficiency.value.toFixed(2)}**`, { text_size: "heading" }),
-            md(`<font color='${COLOR_MUTED}'>数据日期 ${model.efficiency.date}</font>`),
-          ],
-        }),
-      ],
-    });
-  } else {
-    elements.push(md(`<font color='${COLOR_MUTED}'>底表数据暂不可用</font>`));
-  }
 
   // 区块 5：底部状态
   const notes = [];
