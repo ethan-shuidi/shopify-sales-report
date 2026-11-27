@@ -47,6 +47,8 @@ jobs:
           SHOPIFY_STORES_JSON: ${{ secrets.SHOPIFY_STORES_JSON }}
           SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
           SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           MARKET_FILTER: ${{ inputs.market }}
           REPORT_DAY: ${{ inputs.report_day }}
           DRY_RUN: ${{ inputs.dry_run }}

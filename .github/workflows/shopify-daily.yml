@@ -49,6 +49,8 @@ jobs:
           SHOPIFY_API_VERSION: ${{ secrets.SHOPIFY_API_VERSION }}
           SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
           MARKET_FILTER: US
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           REPORT_DAY: ${{ vars.REPORT_DAY || 'yesterday' }}
           DRY_RUN: ${{ inputs.dry_run }}
           WRITE_SNAPSHOT: ${{ inputs.dry_run && 'false' || 'true' }}

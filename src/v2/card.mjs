@@ -277,6 +277,28 @@ function buildElements(model, { collapsible }) {
     ],
   });
 
+  // 区块 4b：经营效率（来自飞书多维表格，标注数据日期）
+  elements.push(md("**经营效率**"));
+  if (model.efficiency) {
+    elements.push({
+      tag: "column_set",
+      flex_mode: "none",
+      horizontal_spacing: "large",
+      columns: [
+        panel({
+          weight: 1,
+          elements: [
+            md(`<font color='${COLOR_MUTED}'>${model.efficiency.label}</font>`),
+            md(`**${model.efficiency.value.toFixed(2)}**`, { text_size: "heading" }),
+            md(`<font color='${COLOR_MUTED}'>数据日期 ${model.efficiency.date}</font>`),
+          ],
+        }),
+      ],
+    });
+  } else {
+    elements.push(md(`<font color='${COLOR_MUTED}'>底表数据暂不可用</font>`));
+  }
+
   // 区块 5：底部状态
   const notes = [];
   if (model.flags?.sessionsOk === false) notes.push("Sessions 数据暂不可用");

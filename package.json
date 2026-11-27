@@ -12,6 +12,6 @@
     "report:v2": "node src/v2/report.mjs",
     "report:v2:dry": "DRY_RUN=true node src/v2/report.mjs",
     "test": "node test/retry.test.mjs",
-    "check": "node --check src/report.mjs && node --check src/v2/report.mjs && node --check src/v2/pipeline.mjs && node --check src/v2/queries.mjs && node --check src/v2/metrics.mjs && node --check src/v2/channels.mjs && node --check src/v2/card.mjs && node --check src/lib/env.mjs && node --check src/lib/shopify.mjs && node --check src/lib/time.mjs && node --check src/lib/feishu.mjs && node --check test/retry.test.mjs"
+    "check": "node --check src/report.mjs && node --check src/v2/report.mjs && node --check src/v2/pipeline.mjs && node --check src/v2/queries.mjs && node --check src/v2/feishu-base.mjs && node --check src/v2/metrics.mjs && node --check src/v2/channels.mjs && node --check src/v2/card.mjs && node --check src/lib/env.mjs && node --check src/lib/shopify.mjs && node --check src/lib/time.mjs && node --check src/lib/feishu.mjs && node --check test/retry.test.mjs"
   }
 }

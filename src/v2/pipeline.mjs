@@ -9,6 +9,7 @@ import { addDays, dateKey, formatClock, formatDateTime, startOfMonthKey, todayKe
 import { fetchSessionChannels, fetchSessionTrend, fetchOrders, SHOP_INFO_QUERY } from "./queries.mjs";
 import { attributionRows, orderMetrics } from "./metrics.mjs";
 import { mergeChannels } from "./channels.mjs";
+import { fetchEfficiency } from "./feishu-base.mjs";
 
 export const reportDay = (process.env.REPORT_DAY || "today").toLowerCase();
 const snapshotDir = process.env.SNAPSHOT_DIR || "snapshots";
@@ -130,6 +131,18 @@ export async function buildStoreModel(storeConfig) {
   const channels = mergeChannels({ sessionRows: channelRows, orderRows: attribution });
   const yesterdayChannels = mergeChannels({ sessionRows: yesterdayChannelRows, orderRows: [] });
 
+  // 经营效率（净MER / ROI）来自飞书多维表格，读不到不影响主报表
+  let efficiency = null;
+  try {
+    efficiency = await fetchEfficiency(storeConfig.market);
+    steps.push(efficiency
+      ? `底表 ✓ ${efficiency.label} ${efficiency.value.toFixed(2)}（${efficiency.date}）`
+      : "底表 ✗ 无可用数据");
+  } catch (error) {
+    steps.push(`底表 ✗ ${error.message}`);
+    console.warn(`[v2] ${storeConfig.market}: 底表读取失败，跳过经营效率：${error.message}`);
+  }
+
   const model = {
     market: storeConfig.market,
     store: storeConfig.store,
@@ -156,6 +169,7 @@ export async function buildStoreModel(storeConfig) {
     last7Sales,
     salesTrend,
     channels,
+    efficiency,
     month: monthMetrics,
     status: {
       updatedAt: `${formatDateTime(new Date(), timezone)}（${timezone}）`,
